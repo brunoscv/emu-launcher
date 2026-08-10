@@ -303,22 +303,45 @@ ainda — só o transporte.
   `python3-websockets` na máquina de dev, então o cliente de teste também é Rust. Também
   confirmado que rodar sem a flag `--server` continua abrindo a janela normal (não quebrou
   o modo desktop).
-- **Falta validar:** rodar `--server` de verdade no PC dedicado do Bruno (sem monitor
-  plugado) — essa parte só ele consegue testar.
+- **Validado no PC dedicado de verdade** — Bruno confirmou que `--server` sobe certinho
+  sem monitor plugado. Corte 5a fechado.
+
+### Corte 5b — protocolo de sala (✅ implementado)
+
+Criar sala, entrar com código, ver quem entrou, marcar "pronto" — **ainda sem** disparar o
+RetroArch (isso é o próximo corte, 5c).
+
+- `src-tauri/src/protocol.rs` — `ClientMessage` (`ListGames`, `CreateRoom`, `JoinRoom`,
+  `SetReady`) e `ServerMessage` (`GamesList`, `RoomState`, `Error`), JSON sobre texto
+  WebSocket (`serde` com `#[serde(tag = "type")]`).
+- `src-tauri/src/lobby.rs` — estado das salas em memória (`Arc<Mutex<HashMap<String, Room>>>`,
+  efêmero de propósito). `create_room`/`join_room` buscam o jogo via `library::list_library()`
+  — **sempre a biblioteca do próprio servidor**, nunca a de quem está pedindo, porque é o
+  servidor quem vai rodar o RetroArch host de verdade (decisão da Fase 3/#005) e precisa
+  do arquivo local. Máximo de jogadores via `player_overrides::get_player_counts()` (mesma
+  regra que a UI: ausência = assume 2).
+- `src-tauri/src/server.rs` — cada conexão usa o padrão consolidado do próprio
+  `tokio-tungstenite` pra chat/broadcast: canal `mpsc::unbounded_channel` guardado no
+  `Player` da sala, drenado num `tokio::select!` junto com a leitura — quando alguém entra
+  numa sala, todo mundo nela (incluindo quem acabou de entrar) recebe o `RoomState`
+  atualizado pelo mesmo canal.
+- **Validado:** teste automatizado (`server::tests::cria_sala_entra_e_marca_pronto`) sobe o
+  servidor de verdade, conecta dois clientes reais via `tokio-tungstenite`, cria sala,
+  entra, marca pronto — confirma o broadcast chegando nos dois lados em cada passo, contra
+  a biblioteca SQLite real (1924 jogos de SNES já indexados), sem mock.
 
 ### Próximos cortes (ainda não implementados)
 
-1. Protocolo de sala: criar sala (escolhe o jogo → lobby consulta #004 pro máximo de
-   jogadores) → link/código de convite → sala de espera com status de pronto/gamepad de
-   cada um.
-2. Atribuição de porta/Multitap ao completar prontidão dentro do limite do jogo → dispara
-   `launch_emulator` no servidor em modo host apontando pro core certo (sempre via
-   `retroarch::expected_installation()`, nunca um binário solto — lição da Fase 3/#005).
-3. Cada cliente (Bruno e amigos) conecta no host via RetroArch nativo assim que a partida é
-   anunciada como pronta.
+1. **Corte 5c** — atribuição de porta/Multitap ao completar prontidão dentro do limite do
+   jogo → dispara `launch_emulator` no servidor em modo host apontando pro core certo
+   (sempre via `retroarch::expected_installation()`, nunca um binário solto — lição da
+   Fase 3/#005). Cada cliente (Bruno e amigos) conecta no host via RetroArch nativo assim
+   que a partida é anunciada como pronta.
+2. UI do lado do cliente (App.tsx) pra criar/entrar em sala, ver a sala de espera e marcar
+   pronto — hoje só existe o protocolo no servidor, testado via cliente Rust de teste.
 
 **Depende de:** #003, #004, #005 (implementados) e #006 (acesso pela internet, ainda não
-feito — o esqueleto de hoje só foi testado em LAN/localhost).
+feito — o corte de hoje só foi testado em LAN/localhost).
 
 ---
 

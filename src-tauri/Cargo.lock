@@ -840,6 +840,7 @@ dependencies = [
  "dirs 5.0.1",
  "dotenvy",
  "futures-util",
+ "rand 0.8.7",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
