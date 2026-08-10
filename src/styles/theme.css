@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Paleta — preto quente (plástico de videogame antigo), não sci-fi frio */
+  --bg-void: #17140f;
+  --bg-shelf: #211c15;
+  --bg-panel: #2a241b;
+  --border-soft: rgba(243, 237, 224, 0.09);
+  --border-strong: rgba(243, 237, 224, 0.18);
+
+  --accent-phosphor: #ffb000; /* âmbar de CRT — acento primário */
+  --accent-phosphor-dim: #8a5f00;
+  --accent-teal: #4fd1c5; /* secundário, uso comedido (netplay/online) */
+
+  --ink-primary: #f3ede0;
+  --ink-muted: #948a78;
+  --ink-faint: #5f5748;
+
+  --danger: #e0654f;
+
+  /* Tipografia */
+  --font-display: 'Archivo Black', 'Arial Black', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Cor por sistema — associadas à identidade real de cada console */
+  --system-snes: #9d8fd6;
+  --system-nes: #c0392b;
+  --system-psx: #7b8a9e;
+  --system-n64: #2e9e6f;
+  --system-gba: #8b4fc7;
+  --system-megadrive: #4a4a4a;
+  --system-arcade: #d9a441;
+  --system-default: var(--accent-phosphor);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  --transition-fast: 140ms ease;
+  --transition-medium: 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms;
+    --transition-medium: 0ms;
+  }
+  .spinner {
+    animation-duration: 1200ms !important;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  opacity: 0.85;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-void);
+  background-image: radial-gradient(
+    ellipse at top,
+    rgba(255, 176, 0, 0.05),
+    transparent 60%
+  );
+  color: var(--ink-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-phosphor);
+  outline-offset: 2px;
+}
+
+/** Utilitário: pega a cor do sistema com fallback seguro */
+.system-tint {
+  color: var(--tint, var(--system-default));
+}
