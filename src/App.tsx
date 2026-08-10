@@ -29,6 +29,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [installingRetroArch, setInstallingRetroArch] = useState(false);
 
   const hasEnabledSystems = useMemo(
     () => systemConfigs.some((c) => c.enabled),
@@ -40,7 +41,9 @@ export default function App() {
   }
 
   useEffect(() => {
-    invoke<SystemDefinition[]>("list_systems").then(setSystems);
+    invoke<SystemDefinition[]>("list_systems")
+      .then(setSystems)
+      .catch((e) => setError(String(e)));
     invoke<RomEntry[]>("list_library").then(setRoms);
     refreshSystemConfigs();
 
@@ -133,6 +136,12 @@ export default function App() {
     setError(null);
     setRunningRom(rom.path);
     try {
+      // Sem custo nas próximas vezes (checa se já existe antes de baixar) —
+      // só demora de verdade na primeira partida de cada máquina.
+      setInstallingRetroArch(true);
+      await invoke("ensure_retroarch_installed");
+      setInstallingRetroArch(false);
+
       await invoke("launch_emulator", {
         emulatorPath: system.emulator_path,
         romPath: rom.path,
@@ -141,6 +150,8 @@ export default function App() {
     } catch (e) {
       setError(String(e));
       setRunningRom(null);
+    } finally {
+      setInstallingRetroArch(false);
     }
   }
 
@@ -166,6 +177,13 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {installingRetroArch && (
+        <div className="retroarch-banner">
+          <span className="spinner" /> Preparando o RetroArch (só demora na primeira vez
+          nesta máquina)...
+        </div>
+      )}
 
       {showSettings ? (
         <main className="app-main">
@@ -273,6 +291,17 @@ export default function App() {
           flex: 1;
           display: flex;
           overflow: hidden;
+        }
+
+        .retroarch-banner {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          padding: 0.6rem 1.5rem;
+          background: color-mix(in srgb, var(--accent-phosphor) 15%, var(--bg-void));
+          color: var(--ink-primary);
+          font-size: 0.85rem;
+          border-bottom: 1px solid var(--border-soft);
         }
 
         .search-row {

@@ -4,11 +4,13 @@
 mod db;
 mod launcher;
 mod library;
+mod retroarch;
 mod scanner;
 mod systems;
 
 use launcher::launch_emulator;
 use library::{get_system_configs, list_library, reindex_library, save_system_configs};
+use retroarch::ensure_retroarch_installed;
 use systems::list_systems;
 
 fn main() {
@@ -19,7 +21,8 @@ fn main() {
             get_system_configs,
             save_system_configs,
             reindex_library,
-            list_library
+            list_library,
+            ensure_retroarch_installed
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri");

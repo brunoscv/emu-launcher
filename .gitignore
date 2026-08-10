@@ -19,3 +19,6 @@ src-tauri/gen/
 .idea/
 .DS_Store
 *.log
+
+# Estado local do Claude Code (agendamento de sessão, etc.)
+.claude/

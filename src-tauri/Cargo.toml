@@ -16,6 +16,9 @@ tokio = { version = "1", features = ["full"] }
 walkdir = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 dirs = "5"
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+futures-util = "0.3"
+sevenz-rust = "0.6"
 
 # Descomente quando começar a seção de netplay (fase 4/5 do plano):
 # tokio-tungstenite = "0.21"

@@ -130,19 +130,37 @@ emu-launcher/
 
 ## Próximos passos (nessa ordem de prioridade)
 
-1. Plugar `GamepadSettings` numa tela/rota de configurações do `App.tsx`
-2. Auto-instalação do RetroArch + cores via buildbot.libretro.com (novo command Rust,
-   ex: `ensure_retroarch_installed`) — ver decisão #2 acima
-3. Capas via `libretro-thumbnails` durante o `reindex_library`, preenchendo `cover_path`
-   (adendo do `IDEAS.md` #002 — schema já tem a coluna, só falta o download/cache)
-4. Servidor de lobby (Node + WebSocket) pro fluxo: criar sala → convidar (link) → sala de
-   espera com confirmação de "pronto" e status do gamepad de cada jogador → atribuir
-   porta/Multitap → disparar RetroArch com os args de host/connect corretos
-5. **Modo local vs. modo servidor** — toggle de conexão + indicador de estado na UI, pra
-   suportar tanto uso 100% offline (notebook antigo) quanto conectado ao PC dedicado.
-   Ver `IDEAS.md` #001 pro plano técnico completo
-6. Preencher `systems.rs` com NES/PSX de verdade (paths reais, não placeholder)
-7. Fase mais distante: servidor headless no segundo PC (decisão #6)
+Trabalho de UI solo (lista, busca, paginação) está OK por ora — o foco agora é a
+**arquitetura de multiplayer**, num plano faseado (branch `EMU-001`), cada fase com
+critério de sucesso próprio antes de avançar pra próxima. Detalhe técnico completo de
+cada fase em `IDEAS.md` #003-#007 (e #001, que amarra tudo na UI no final).
+
+1. ✅ **Fase 1 — Instalador do RetroArch com versão fixa (Linux + Windows)** — `IDEAS.md`
+   #003. Fixado em **1.22.2** (a 1.18.0 do Bruno era do apt, nunca existiu no buildbot);
+   `ensure_retroarch_installed` valida do e baixa/extrai/dá permissão de execução —
+   validado ao vivo no Linux (download real + AppImage rodando). Windows implementado mas
+   ainda sem teste numa máquina real.
+2. **Fase 2 — Metadata de "número de jogadores" por jogo** — `IDEAS.md` #004. Automático
+   via ScreenScraper/IGDB durante o `reindex_library` + tabela de override manual pros
+   casos de Multitap que a fonte automática não pega.
+3. **Fase 3 — Prova de conceito: RetroArch headless no PC dedicado** — `IDEAS.md` #005.
+   Maior risco técnico do plano; valida isolado antes de construir o lobby em cima.
+4. **Fase 4 — Acesso pela internet** — `IDEAS.md` #006. Port-forward + DDNS no roteador
+   do Bruno como caminho preferido; VPN (Tailscale) como plano B.
+5. **Fase 5 — Servidor de lobby multiplayer** — `IDEAS.md` #007. Sala → convite → prontidão
+   → atribuição de porta/Multitap baseada no jogo (Fase 2) → dispara RetroArch host no
+   servidor (Fase 3).
+6. **Fase 6 — Modo Standalone vs. Servidor na UI** — `IDEAS.md` #001. Toggle + indicador de
+   conexão; só fica trivial depois que as fases 1-5 existirem.
+7. **Fase 7 — Deploy real no PC dedicado** — clonar o repo lá, rodar em modo servidor
+   (headless, sem GUI), manter no ar (ex: serviço systemd).
+
+Pendências menores, sem prioridade fixa ainda:
+
+- Plugar `GamepadSettings` numa tela/rota de configurações do `App.tsx`
+- Capas via `libretro-thumbnails` durante o `reindex_library`, preenchendo `cover_path`
+  (adendo do `IDEAS.md` #002 — schema já tem a coluna, só falta o download/cache)
+- Preencher `systems.rs` com NES/PSX de verdade (paths reais, não placeholder)
 
 ## Preferências de trabalho do Bruno
 
