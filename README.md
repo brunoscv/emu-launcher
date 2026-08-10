@@ -1,65 +1,82 @@
-# Emu Launcher — esqueleto Tauri v2 + React
+# Emu Launcher
 
-Esqueleto inicial do projeto, já migrado de Tauri 1.5 → **Tauri v2** (viável agora que
-o SO vai ser Xubuntu 24.04, sem a trava de glibc do Mint 19.3).
+Launcher de emuladores estilo Batocera/EmulationStation, com foco em **jogar online com
+amigos sem fricção** — o problema que motivou o projeto foi um site de emulação nunca
+reconhecer o controle USB de um amigo, forçando ele a jogar de teclado.
 
-## O que já está pronto
+Roda o [RetroArch](https://www.retroarch.com/) nativo por trás de uma UI própria: nada de
+reimplementar netcode — o netplay rollback do RetroArch já é maduro, o launcher só cuida da
+experiência (indexar sua biblioteca, escolher o jogo, calibrar o controle).
 
-- `scan_roms` (Rust) — varre pastas por extensão e devolve `RomEntry[]`
-- `launch_emulator` (Rust, async) — dispara o processo do emulador e emite o evento
-  `emulator-closed` quando ele termina, sem bloquear a UI
-- `list_systems` (Rust) — mapeamento sistema → emulador (por enquanto hardcoded em
-  `systems.rs`; trocar por `systems.json` editável na fase de settings)
-- Grid React básico consumindo os três comandos acima, com tratamento de erro simples
-- **Módulo de gamepad completo** (`src/gamepad/`) — resolve o problema de controles não
-  reconhecidos (ex: Razer que não funcionava no retrogames.cc):
-  - `GamepadManager.ts` — loop de polling via `requestAnimationFrame`
-  - `GamepadCalibration.tsx` — tela que pede pra apertar cada botão e captura o índice físico
-  - `GamepadSettings.tsx` — lista controles conectados, mostra se já tem perfil calibrado
-  - `storage.ts` — persiste o mapeamento por `gamepad.id` (localStorage por enquanto)
-  - Funciona idêntico no modo web e dentro do Tauri, porque ambos rodam a mesma Gamepad API
-    do browser (Tauri usa WebView por baixo)
-  - **Ainda não está plugado no `App.tsx`** — importe `GamepadSettings` de `src/gamepad`
-    numa aba/rota de configurações quando for integrar
+## Funcionalidades
 
-## O que falta (próximos passos do plano)
+- **Biblioteca indexada em SQLite** — cada console tem sua própria pasta de roms
+  configurável; a varredura pesada (`reindex_library`) roda só quando você pede, a listagem
+  do dia a dia (`list_library`) lê do banco e é instantânea
+- **Menu de consoles** — escolha quais sistemas você emula e onde estão as roms de cada um
+- **Busca, navegação por letra (0-9/# → A-Z) e paginação de 50 em 50** — pensado pra
+  bibliotecas grandes (testado com ~2000 jogos de SNES) sem pesar a renderização
+- **Lançamento assíncrono do emulador** — dispara o RetroArch via `Command::spawn` no lado
+  Rust e emite um evento quando o processo fecha, sem travar a UI
+- **Módulo de gamepad** (`src/gamepad/`) — calibração manual por `gamepad.id`, resolve
+  controles de terceiros que o browser não mapeia como `"standard"` (ainda não integrado
+  na tela principal)
 
-- [ ] Plugar `GamepadSettings` numa tela de configurações do App.tsx
-- [ ] Tela de configurações geral (pastas de rom, caminho dos emuladores/cores)
-- [ ] Metadata de jogos (capa/descrição) — ver seção 2.3 do plano de desenvolvimento
-- [ ] Ícones do app em `src-tauri/icons/` (rode `npm run tauri icon caminho/para/logo.png`
-      pra gerar todos os tamanhos — sem isso o `tauri build` falha)
-- [ ] Modo web com EmulatorJS (cores libretro em WASM) — ver seção 0.1 do plano
-- [ ] Módulo de netplay (`src-tauri/src/netplay/`, dependências comentadas no `Cargo.toml`)
-- [ ] Signaling server (projeto Node separado, fora deste repo)
+## Stack
 
-## Setup (depois de trocar pro Xubuntu 24.04)
+- **Backend**: Rust + [Tauri v2](https://v2.tauri.app/)
+- **Frontend**: React 18 + TypeScript + Vite 5
+- **Índice local**: SQLite via `rusqlite`
+- **Emulação**: RetroArch instalado no sistema, orquestrado via Tauri commands
+
+## Rodando localmente
+
+Dependências de sistema (Ubuntu/Debian):
 
 ```bash
-# dependências do sistema
 sudo apt update && sudo apt install -y \
   build-essential libwebkit2gtk-4.1-dev libgtk-3-dev \
   libayatana-appindicator3-dev librsvg2-dev pkg-config
+```
 
-# Rust
+Rust (via [rustup](https://rustup.rs/), não via apt) e Node 18+ (via [nvm](https://github.com/nvm-sh/nvm)):
+
+```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Node 18+ via nvm
 nvm install 18 && nvm alias default 18
+```
 
-# projeto
+Projeto:
+
+```bash
 npm install
 npm run tauri dev
 ```
 
-## Notas de migração 1.5 → 2
+No primeiro uso, abra "⚙ Consoles" e configure a pasta de roms de cada sistema que você
+quer emular, depois clique em "Reindexar biblioteca".
 
-- `invoke` agora vem de `@tauri-apps/api/core`, não mais de `@tauri-apps/api/tauri`
-- Allowlist do v1 (`tauri.conf.json > tauri > allowlist`) foi substituída pelo sistema
-  de **capabilities** (`src-tauri/capabilities/default.json`)
-- Como `launch_emulator` roda o `Command::spawn` inteiramente em Rust (dentro do
-  comando `#[tauri::command]`), **não precisamos do plugin `shell`** nem da permissão
-  `shell:allow-execute` — mais simples e mais seguro do que expor shell-execute pro
-  JS do frontend, como estava no plano original com a feature `shell-execute` do v1
-- `tauri.conf.json` mudou de schema: `devPath`/`distDir` viraram `devUrl`/`frontendDist`,
-  e a seção `tauri` foi renomeada para `app`
+## Estrutura
+
+```
+src-tauri/src/
+├── main.rs      # registra os commands Tauri
+├── db.rs        # conexão SQLite + schema
+├── library.rs   # commands de configuração de consoles e índice da biblioteca
+├── scanner.rs   # varredura de pasta de rom por sistema
+├── launcher.rs  # dispara o RetroArch
+└── systems.rs   # mapeamento sistema → emulador/core
+
+src/
+├── App.tsx
+├── components/       # UI: lista de jogos, abas de sistema/letra, paginação, config
+├── gamepad/          # calibração de controle (não integrado ainda)
+└── types/rom.ts       # tipos espelhando as structs Rust
+```
+
+## Roadmap
+
+O plano de longo prazo (netplay via RetroArch, auto-instalação de emuladores, servidor de
+lobby, modo local vs. servidor, servidor headless com streaming) está documentado em
+[`CLAUDE.md`](./CLAUDE.md). Ideias em avaliação, implementadas ou descartadas — com o
+porquê de cada decisão — ficam em [`IDEAS.md`](./IDEAS.md).
