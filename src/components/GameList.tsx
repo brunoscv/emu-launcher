@@ -1,14 +1,18 @@
 import type { RomEntry } from "../types/rom";
 import { systemColor, systemLabel } from "./systemMeta";
 
+const PLAYER_COUNT_OPTIONS = [2, 3, 4];
+
 interface Props {
   roms: RomEntry[];
   runningPath: string | null;
   error: string | null;
   loading: boolean;
   hasEnabledSystems: boolean;
+  playerCounts: Record<string, number>;
   onPlay: (rom: RomEntry) => void;
   onConfigureSystems: () => void;
+  onSetPlayerCount: (rom: RomEntry, maxPlayers: number) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -39,8 +43,10 @@ export function GameList({
   error,
   loading,
   hasEnabledSystems,
+  playerCounts,
   onPlay,
   onConfigureSystems,
+  onSetPlayerCount,
 }: Props) {
   return (
     <div className="game-list-wrap">
@@ -73,6 +79,7 @@ export function GameList({
           {roms.map((rom) => {
             const tint = systemColor(rom.system);
             const isRunning = rom.path === runningPath;
+            const maxPlayers = playerCounts[rom.path] ?? 2;
             return (
               <div
                 key={rom.path}
@@ -90,6 +97,20 @@ export function GameList({
                     {systemLabel(rom.system)} · {formatSize(rom.size_bytes)}
                   </p>
                 </div>
+
+                <select
+                  className="game-row__players"
+                  data-overridden={maxPlayers > 2}
+                  value={maxPlayers}
+                  title="Número máximo de jogadores (multiplayer/Multitap)"
+                  onChange={(e) => onSetPlayerCount(rom, Number(e.target.value))}
+                >
+                  {PLAYER_COUNT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      👥 {n}
+                    </option>
+                  ))}
+                </select>
 
                 {isRunning ? (
                   <span className="game-row__running">Rodando...</span>
@@ -222,6 +243,23 @@ export function GameList({
 
         .game-row__play:disabled {
           cursor: not-allowed;
+        }
+
+        .game-row__players {
+          flex: 0 0 auto;
+          background: transparent;
+          border: 1px solid transparent;
+          border-radius: var(--radius-sm);
+          color: var(--ink-faint);
+          font-size: 0.8rem;
+          padding: 0.3rem 0.4rem;
+        }
+
+        /* só chama atenção quando foge do padrão (2 jogadores) — o resto da
+           biblioteca não precisa desse ruído visual */
+        .game-row__players[data-overridden="true"] {
+          color: var(--accent-teal);
+          border-color: var(--border-soft);
         }
 
         .game-row__running {

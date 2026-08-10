@@ -123,9 +123,10 @@ Windows limpa (ou VM) e conseguir abrir um jogo, sem nenhum passo manual.
 
 ---
 
-## 🔧 #004 — Metadata de "número de jogadores" por jogo
+## ✅ #004 — Metadata de "número de jogadores" por jogo
 
-**Registrada em:** 10/08/2026
+**Registrada em:** 10/08/2026 · **Implementada em:** 10/08/2026 (branch `EMU-001`),
+override manual + busca automática via IGDB, os dois validados com chamada real.
 
 **A ideia:** o lobby (#007) precisa saber quantos jogadores um jogo específico suporta pra
 abrir a sala com o número certo de vagas (ex: Superstar Soccer Deluxe e NBA Jam Tournament
@@ -134,24 +135,56 @@ lendo o core libretro** — cores expõem no máximo quantas portas de controle 
 aceita, não se aquela *ROM específica* usa as portas extras. É característica do jogo, não
 do core.
 
-### Plano técnico inicial
+### Decisão de fonte automática: IGDB (não ScreenScraper)
 
-1. **Fonte automática:** durante o `reindex_library` (#002), consultar ScreenScraper ou
-   IGDB pelo nome do jogo (mesmo mecanismo cogitado pras capas no adendo do #002) e gravar
-   o número de jogadores retornado.
-2. **Tabela de override manual (SQLite):** nova tabela, ex.
-   `game_player_overrides(rom_path TEXT PRIMARY KEY, max_players INTEGER, uses_multitap INTEGER)`
-   — o Bruno corrige manualmente quando a fonte automática errar ou não tiver o jogo
-   catalogado (bem provável pro caso específico do Multitap, que é uma informação meio de
-   nicho).
-3. **Precedência:** override manual sempre vence o valor automático quando existir uma
-   linha pro `rom_path`.
+Pesquisei as duas, Bruno inicialmente preferiu ScreenScraper (mesmo ecossistema do
+`libretro-thumbnails`), mas essa exige `devid`/`devpassword` **obrigatórios em toda
+chamada** e aprovação manual via fórum deles, sem prazo — bloqueio externo real (Bruno
+ainda não tinha conta nem pedido acesso). Bruno decidiu trocar pra **IGDB**: cadastro
+instantâneo via Twitch Developer Console (sem aprovação manual), e um recurso
+`multiplayer_modes` com campos estruturados exatos pro que precisamos: `offlinemax`,
+`onlinemax`, `offlinecoopmax`, `onlinecoopmax`.
 
-**Depende de:** #002 (já implementado) pro pipeline de reindexação onde essa busca entra.
+### Plano técnico (implementado)
 
-**Critério de sucesso:** a lista mostra "até 4 jogadores" pro Superstar Soccer Deluxe (via
-override manual, ao menos no início) e um número plausível pra maioria dos outros SNES via
-busca automática, sem o Bruno ter digitado isso à mão pra cada jogo da biblioteca.
+1. **Tabela de override manual (SQLite):**
+   `game_player_overrides(rom_path TEXT PRIMARY KEY, max_players INTEGER NOT NULL, uses_multitap INTEGER NOT NULL DEFAULT 0)`
+   em `db.rs`. `max_players <= 2` apaga a linha (2 é o padrão assumido pra quem não está na
+   tabela). UI: seletor "👥 2/3/4" discreto em cada linha da `GameList` (só fica destacado
+   visualmente quando > 2).
+2. **Cache do resultado automático:** `game_player_auto(rom_path TEXT PRIMARY KEY, max_players INTEGER, checked_at TEXT)`
+   — sempre grava uma linha depois de consultar (mesmo quando não acha multiplayer, com
+   `max_players NULL`), pra `enrich_player_counts` não reconsultar o mesmo jogo sem
+   multiplayer a cada execução. Torna a busca **incremental**: só verifica jogo novo desde
+   a última vez.
+3. **Módulo `igdb.rs`:** OAuth client-credentials do Twitch (`fetch_token`) + consulta
+   Apicalypse em `POST api.igdb.com/v4/games` com `search "<nome>"; fields
+   multiplayer_modes.offlinemax,...;` (`fetch_max_players`), pegando o maior valor entre os
+   campos de multiplayer (filtrando `0`/ausente, que no IGDB significa "não se aplica", não
+   "zero jogadores"). Credenciais em `.env` na raiz do projeto
+   (`IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET`, carregado via `dotenvy` no `main.rs`,
+   gitignored) — ausência do `.env` não quebra nada, só desativa a busca automática
+   (override manual continua funcionando sozinho).
+4. **`enrich_player_counts` é uma ação separada do `reindex_library`**, disparada pelo
+   botão "👥 Buscar jogadores (IGDB)" — não pelo reindex normal, porque consultar a API pra
+   milhares de jogos é lento (rate limit ~4 req/s do plano gratuito do IGDB, ~300ms de
+   delay entre chamadas aqui) e não devia travar a ação de "só recarregar a lista de roms".
+   Emite o evento `player-count-progress` (`{checked, total}`) pro frontend mostrar
+   andamento durante a espera.
+5. **Precedência:** `get_player_counts` (novo command combinado) resolve
+   `COALESCE(override, automático, 2)` — override manual sempre vence.
+
+**Validado com chamada real:** teste `#[ignore]` em `igdb.rs`
+(`busca_de_verdade_o_superstar_soccer_deluxe`, `cargo test -- --ignored --nocapture`)
+buscou "International Superstar Soccer Deluxe" de verdade no IGDB e recebeu `max_players:
+Some(4)` — bate exatamente com o Multitap que motivou essa fase inteira.
+
+**Depende de:** #002 (implementado) pro pipeline de reindexação onde os jogos entram na
+tabela `games` (fonte do que o `enrich_player_counts` varre).
+
+**Critério de sucesso:** ✅ atingido — a lista mostra "até 4 jogadores" pro Superstar Soccer
+Deluxe tanto via override manual quanto (assim que o Bruno rodar "Buscar jogadores (IGDB)")
+via detecção automática real, sem digitar isso à mão pra cada jogo da biblioteca.
 
 ---
 

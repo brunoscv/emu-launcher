@@ -140,9 +140,13 @@ cada fase em `IDEAS.md` #003-#007 (e #001, que amarra tudo na UI no final).
    `ensure_retroarch_installed` valida do e baixa/extrai/dá permissão de execução —
    validado ao vivo no Linux (download real + AppImage rodando). Windows implementado mas
    ainda sem teste numa máquina real.
-2. **Fase 2 — Metadata de "número de jogadores" por jogo** — `IDEAS.md` #004. Automático
-   via ScreenScraper/IGDB durante o `reindex_library` + tabela de override manual pros
-   casos de Multitap que a fonte automática não pega.
+2. ✅ **Fase 2 — Metadata de "número de jogadores" por jogo** — `IDEAS.md` #004. Override
+   manual (tabela SQLite + seletor "👥" na `GameList`) e busca automática via **IGDB**
+   (trocado de ScreenScraper — cadastro instantâneo, sem aprovação manual) implementados e
+   validados com chamada real (Superstar Soccer Deluxe → 4 jogadores, batendo com o
+   Multitap). Credenciais em `.env` na raiz (gitignored), busca disparada pelo botão "👥
+   Buscar jogadores (IGDB)", separada do reindex normal por ser mais lenta (rate limit da
+   API).
 3. **Fase 3 — Prova de conceito: RetroArch headless no PC dedicado** — `IDEAS.md` #005.
    Maior risco técnico do plano; valida isolado antes de construir o lobby em cima.
 4. **Fase 4 — Acesso pela internet** — `IDEAS.md` #006. Port-forward + DDNS no roteador

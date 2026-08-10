@@ -28,6 +28,21 @@ export interface ReindexResult {
   warnings: string[];
 }
 
+export interface PlayerCount {
+  rom_path: string;
+  max_players: number;
+}
+
+export interface EnrichProgress {
+  checked: number;
+  total: number;
+}
+
+export interface EnrichResult {
+  checked: number;
+  found: number;
+}
+
 export interface LaunchResult {
   started: boolean;
   pid: number | null;

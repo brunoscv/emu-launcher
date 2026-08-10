@@ -6,6 +6,9 @@ import type {
   SystemDefinition,
   SystemConfig,
   ReindexResult,
+  PlayerCount,
+  EnrichProgress,
+  EnrichResult,
   EmulatorClosedPayload,
 } from "./types/rom";
 import { SystemTabs } from "./components/SystemTabs";
@@ -30,6 +33,44 @@ export default function App() {
   const [reindexing, setReindexing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [installingRetroArch, setInstallingRetroArch] = useState(false);
+  const [playerCounts, setPlayerCounts] = useState<Record<string, number>>({});
+  const [enriching, setEnriching] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
+
+  function refreshPlayerCounts() {
+    invoke<PlayerCount[]>("get_player_counts").then((counts) => {
+      const byPath: Record<string, number> = {};
+      for (const c of counts) byPath[c.rom_path] = c.max_players;
+      setPlayerCounts(byPath);
+    });
+  }
+
+  async function handleSetPlayerCount(rom: RomEntry, maxPlayers: number) {
+    await invoke("save_player_override", {
+      romPath: rom.path,
+      maxPlayers,
+      usesMultitap: maxPlayers > 2,
+    });
+    refreshPlayerCounts();
+  }
+
+  async function handleEnrichPlayerCounts() {
+    setError(null);
+    setEnriching(true);
+    setEnrichProgress(null);
+    try {
+      const result = await invoke<EnrichResult>("enrich_player_counts");
+      refreshPlayerCounts();
+      setError(
+        `IGDB: ${result.checked} jogo(s) verificado(s), ${result.found} com dado de multiplayer.`
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setEnriching(false);
+      setEnrichProgress(null);
+    }
+  }
 
   const hasEnabledSystems = useMemo(
     () => systemConfigs.some((c) => c.enabled),
@@ -46,13 +87,18 @@ export default function App() {
       .catch((e) => setError(String(e)));
     invoke<RomEntry[]>("list_library").then(setRoms);
     refreshSystemConfigs();
+    refreshPlayerCounts();
 
-    const unlisten = listen<EmulatorClosedPayload>("emulator-closed", () => {
+    const unlistenClosed = listen<EmulatorClosedPayload>("emulator-closed", () => {
       setRunningRom(null);
+    });
+    const unlistenProgress = listen<EnrichProgress>("player-count-progress", (event) => {
+      setEnrichProgress(event.payload);
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenClosed.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
     };
   }, []);
 
@@ -175,6 +221,15 @@ export default function App() {
               "Reindexar biblioteca"
             )}
           </button>
+          <button className="btn-scan" onClick={handleEnrichPlayerCounts} disabled={enriching}>
+            {enriching ? (
+              <>
+                <span className="spinner" /> Buscando no IGDB...
+              </>
+            ) : (
+              "👥 Buscar jogadores (IGDB)"
+            )}
+          </button>
         </div>
       </header>
 
@@ -182,6 +237,13 @@ export default function App() {
         <div className="retroarch-banner">
           <span className="spinner" /> Preparando o RetroArch (só demora na primeira vez
           nesta máquina)...
+        </div>
+      )}
+
+      {enriching && enrichProgress && (
+        <div className="retroarch-banner">
+          <span className="spinner" /> Verificando jogadores no IGDB: {enrichProgress.checked} de{" "}
+          {enrichProgress.total}...
         </div>
       )}
 
@@ -230,8 +292,10 @@ export default function App() {
               error={error}
               loading={reindexing}
               hasEnabledSystems={hasEnabledSystems}
+              playerCounts={playerCounts}
               onPlay={handlePlay}
               onConfigureSystems={() => setShowSettings(true)}
+              onSetPlayerCount={handleSetPlayerCount}
             />
           </main>
 
