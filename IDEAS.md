@@ -188,30 +188,55 @@ via detecção automática real, sem digitar isso à mão pra cada jogo da bibli
 
 ---
 
-## 🔧 #005 — RetroArch headless no servidor dedicado (prova de conceito)
+## ✅ #005 — RetroArch headless no servidor dedicado (prova de conceito)
 
-**Registrada em:** 10/08/2026
+**Registrada em:** 10/08/2026 · **Validada em:** 10/08/2026 — testada de verdade pelo
+Bruno no PC dedicado + notebook, funcionou.
 
 **A ideia:** antes de construir o lobby (#007) em cima da suposição de que "o servidor
-consegue hospedar uma partida de RetroArch sem monitor", validar isso isoladamente. É o
-maior risco técnico do plano faseado inteiro — se não funcionar do jeito esperado (driver
-de vídeo sem X, saída de áudio sem dispositivo real, etc.), é melhor descobrir aqui do que
-depois de já ter o lobby inteiro escrito em cima.
+consegue hospedar uma partida de RetroArch sem monitor", validar isso isoladamente. Era o
+maior risco técnico do plano faseado inteiro — havia inclusive um crash documentado do
+RetroArch justamente na combinação driver de vídeo `null` + host de netplay
+([issue #9067](https://github.com/libretro/RetroArch/issues/9067), corrigida em algum
+commit posterior, sem certeza se afetava a 1.22.2).
 
-### Plano técnico inicial
+### O que foi testado (roteiro CLI manual, fora do app — ver justificativa abaixo)
 
-1. Testar RetroArch rodando sem monitor físico no PC dedicado (Xvfb + driver de vídeo, ou
-   investigar se algum driver "null"/dummy do próprio RetroArch resolve sem precisar de X
-   virtual) atuando como host de netplay.
-2. Validar áudio headless (dummy/null audio driver — não precisa de som de verdade saindo
-   de lugar nenhum, só não pode travar o processo).
-3. Teste real: Bruno + 1 amigo conectando via RetroArch nativo (cliente normal, instalado
-   via #003) nesse host headless, jogando um jogo de SNES qualquer, na LAN.
+1. RetroArch 1.22.2 instalado manualmente no PC dedicado (mesmos `.7z` do buildbot),
+   `video_driver`/`audio_driver = "null"` via `--appendconfig`, host com `--host --port
+   55435 -L core rom`.
+2. Cliente no notebook conectando com `--connect`/`-C`.
+3. **Resultado:** conectou e jogou — log real mostrou `[Netplay] Você se juntou como
+   jogador 2 (ping: 15 ms)`. Sem crash.
 
-**Depende de:** #003 (a mesma versão fixa de RetroArch precisa estar rodando no servidor).
+### Lição aprendida (importante pro #007)
 
-**Critério de sucesso:** os dois conseguem jogar uma partida completa contra/junto no host
-headless, sem crash, com input responsivo.
+A primeira tentativa **falhou** por descompasso de versão: o comando do lado do notebook
+chamou o `retroarch` do `PATH` (a instalação via apt, 1.16/1.18), não a instalação
+gerenciada pelo nosso app (1.22.2, a mesma que estava no servidor) — porque nesse teste
+isolado o Bruno instalou o RetroArch "por fora", sem usar o `ensure_retroarch_installed`
+do projeto. Resolvido apontando pro binário certo. **Conclusão que já vira requisito pro
+#007:** o servidor de lobby SEMPRE deve chamar o RetroArch através do mesmo mecanismo
+gerenciado (`retroarch.rs`), nunca um `retroarch` solto do sistema/PATH — em nenhuma das
+duas pontas (cliente ou host). Foi exatamente o bug que a Fase 1 foi criada pra evitar, e
+aconteceu de novo só porque esse teste específico rodou por fora do app de propósito
+(pra isolar a variável "RetroArch headless funciona?" antes de integrar).
+
+### Por que foi feito via terminal, fora do app (e o que isso significa pro #007)
+
+Essa fase testou uma pergunta bem específica — "o RetroArch em si consegue rodar sem tela
+e hospedar netplay nessa máquina?" — que é um risco do RetroArch/AppImage/driver de vídeo,
+não do nosso código. Validar via terminal foi a forma mais barata de isolar essa dúvida
+antes de construir um "modo servidor" inteiro no app em cima de uma suposição que podia
+não funcionar. Nada se perde: o #007 vai reusar exatamente esse mesmo padrão de comando
+(`--host`/`--appendconfig` com drivers null), só que disparado pelo `launcher.rs` a partir
+da lógica do lobby, com o caminho do binário sempre vindo de `retroarch::expected_installation()`
+— nunca hardcoded/do PATH.
+
+**Depende de:** #003 (implementado).
+
+**Critério de sucesso:** ✅ atingido — partida jogável no host headless, sem crash, ping
+baixo (15ms, mesma rede).
 
 ---
 
@@ -242,28 +267,58 @@ fora da rede do Bruno.
 
 ---
 
-## 🔧 #007 — Servidor de lobby multiplayer (sala baseada no jogo)
+## 🚧 #007 — Servidor de lobby multiplayer (sala baseada no jogo)
 
-**Registrada em:** 10/08/2026
+**Registrada em:** 10/08/2026 · **Corte 5a (esqueleto) implementado em:** 10/08/2026
+(branch `EMU-001`).
 
 **A ideia:** o núcleo do multiplayer — uma sala de espera que sabe, pelo jogo escolhido,
 quantos jogadores cabem (#004), deixa cada um confirmar "pronto" (com o gamepad calibrado,
 ver `src/gamepad/`), atribui a porta/Multitap de cada jogador e dispara a partida no
 RetroArch headless do servidor (#005), acessível pelos amigos pela internet (#006).
 
-### Plano técnico inicial
+**Decisão de arquitetura (fechada com o Bruno):** servidor de lobby é **Rust, no mesmo
+projeto** (não Node separado) — reusa `db.rs`, `retroarch.rs`, `launcher.rs`, `library.rs`
+direto. O "modo servidor" **pula o Tauri/GTK inteiramente** (flag `--server`): o PC
+dedicado pode não ter monitor plugado, e o Tauri normal precisa de um display (X11/Wayland)
+só pra inicializar a janela, mesmo escondida — em vez de depender disso (ou Xvfb) só pro
+nosso app, o `main.rs` detecta a flag e nunca chama `tauri::Builder`, só sobe um loop
+assíncrono Rust puro.
 
-1. Servidor Node + WebSocket (ou Rust, a decidir na hora — Node é mais rápido de prototipar
-   pra essa camada, mas dá pra reavaliar) rodando junto com o RetroArch headless no PC
-   dedicado.
-2. Fluxo: criar sala (escolhe o jogo → lobby consulta #004 pro máximo de jogadores) →
-   compartilha link/código de convite → sala de espera com status de pronto/gamepad de cada
-   um → ao completar prontidão dentro do limite do jogo, atribui porta/Multitap → dispara
-   `launch_emulator` no servidor em modo host apontando pro core certo.
-3. Cada cliente (Bruno e amigos) conecta no host via RetroArch nativo assim que a partida
-   é anunciada como pronta.
+### Corte 5a — esqueleto de transporte (✅ implementado)
 
-**Depende de:** #003, #004, #005 e #006 — é a última peça, a que amarra tudo.
+Antes de desenhar o protocolo de sala inteiro, validar que o processo consegue: 1) subir em
+modo servidor sem GUI, 2) aceitar conexão WebSocket. Sem sala, sem estado, sem RetroArch
+ainda — só o transporte.
+
+- `src-tauri/src/server.rs` — `tokio-tungstenite`, `TcpListener` na porta `7777` (fixa,
+  arbitrária, diferente da porta de netplay do RetroArch — 55435 — pra não confundir os
+  dois protocolos). Por enquanto só ecoa `"pong"` pra `"ping"`.
+- `main.rs` — checa `--server` nos argumentos antes de montar o Tauri Builder; se presente,
+  cria um `tokio::runtime::Runtime` manualmente e roda `server::run()`, depois retorna sem
+  nunca tocar no código do Tauri (evita o erro clássico "cannot start a runtime from within
+  a runtime" de misturar o runtime do Tauri com um `#[tokio::main]` no `main()` inteiro).
+- **Validado:** teste automatizado (`cargo test responde_pong_pra_ping`) sobe o servidor de
+  verdade e conecta como cliente real via `tokio-tungstenite` — não tinha `websocat` nem
+  `python3-websockets` na máquina de dev, então o cliente de teste também é Rust. Também
+  confirmado que rodar sem a flag `--server` continua abrindo a janela normal (não quebrou
+  o modo desktop).
+- **Falta validar:** rodar `--server` de verdade no PC dedicado do Bruno (sem monitor
+  plugado) — essa parte só ele consegue testar.
+
+### Próximos cortes (ainda não implementados)
+
+1. Protocolo de sala: criar sala (escolhe o jogo → lobby consulta #004 pro máximo de
+   jogadores) → link/código de convite → sala de espera com status de pronto/gamepad de
+   cada um.
+2. Atribuição de porta/Multitap ao completar prontidão dentro do limite do jogo → dispara
+   `launch_emulator` no servidor em modo host apontando pro core certo (sempre via
+   `retroarch::expected_installation()`, nunca um binário solto — lição da Fase 3/#005).
+3. Cada cliente (Bruno e amigos) conecta no host via RetroArch nativo assim que a partida é
+   anunciada como pronta.
+
+**Depende de:** #003, #004, #005 (implementados) e #006 (acesso pela internet, ainda não
+feito — o esqueleto de hoje só foi testado em LAN/localhost).
 
 ---
 

@@ -147,13 +147,19 @@ cada fase em `IDEAS.md` #003-#007 (e #001, que amarra tudo na UI no final).
    Multitap). Credenciais em `.env` na raiz (gitignored), busca disparada pelo botão "👥
    Buscar jogadores (IGDB)", separada do reindex normal por ser mais lenta (rate limit da
    API).
-3. **Fase 3 — Prova de conceito: RetroArch headless no PC dedicado** — `IDEAS.md` #005.
-   Maior risco técnico do plano; valida isolado antes de construir o lobby em cima.
+3. ✅ **Fase 3 — Prova de conceito: RetroArch headless no PC dedicado** — `IDEAS.md` #005.
+   Testado de verdade pelo Bruno (PC dedicado + notebook): conectou, jogou, ping 15ms, sem
+   crash. Lição aprendida: o primeiro teste falhou por descompasso de versão porque usou
+   RetroArch instalado "por fora" (não pela instalação gerenciada do app) — vira requisito
+   pro #007: servidor de lobby SEMPRE chama RetroArch via `retroarch::expected_installation()`,
+   nunca um binário solto do PATH/sistema, nem no host nem no cliente.
 4. **Fase 4 — Acesso pela internet** — `IDEAS.md` #006. Port-forward + DDNS no roteador
    do Bruno como caminho preferido; VPN (Tailscale) como plano B.
-5. **Fase 5 — Servidor de lobby multiplayer** — `IDEAS.md` #007. Sala → convite → prontidão
-   → atribuição de porta/Multitap baseada no jogo (Fase 2) → dispara RetroArch host no
-   servidor (Fase 3).
+5. 🚧 **Fase 5 — Servidor de lobby multiplayer** — `IDEAS.md` #007. Rust no mesmo projeto,
+   `--server` pula o Tauri/GTK inteiramente (PC dedicado pode não ter monitor). Corte 5a
+   (esqueleto WebSocket na porta 7777, `src-tauri/src/server.rs`) **implementado e testado**.
+   Falta o protocolo de sala de verdade: convite → prontidão → atribuição de porta/Multitap
+   baseada no jogo (Fase 2) → dispara RetroArch host (Fase 3).
 6. **Fase 6 — Modo Standalone vs. Servidor na UI** — `IDEAS.md` #001. Toggle + indicador de
    conexão; só fica trivial depois que as fases 1-5 existirem.
 7. **Fase 7 — Deploy real no PC dedicado** — clonar o repo lá, rodar em modo servidor

@@ -8,6 +8,7 @@ mod library;
 mod player_overrides;
 mod retroarch;
 mod scanner;
+mod server;
 mod systems;
 
 use igdb::enrich_player_counts;
@@ -23,6 +24,20 @@ fn main() {
     // instalação de um amigo esse arquivo não existe, e tudo bem: a busca
     // automática só fica indisponível, o override manual continua ok.
     dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../.env")).ok();
+
+    // Modo servidor (Fase 5, IDEAS.md #007) — pula o Tauri/GTK inteiramente.
+    // O PC dedicado pode não ter monitor nenhum plugado, e o Tauri normal
+    // precisa de um display (X11/Wayland) só pra inicializar a janela, mesmo
+    // escondida. Cria o runtime async manualmente aqui (em vez de
+    // `#[tokio::main]` no main() inteiro) porque o `tauri::Builder::run`
+    // abaixo já gerencia o próprio runtime por baixo — os dois juntos dariam
+    // o erro clássico do Tokio "cannot start a runtime from within a runtime".
+    if std::env::args().any(|arg| arg == "--server") {
+        tokio::runtime::Runtime::new()
+            .expect("não consegui iniciar o runtime assíncrono do modo servidor")
+            .block_on(server::run());
+        return;
+    }
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
