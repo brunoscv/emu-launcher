@@ -17,6 +17,8 @@ import { SystemSelector } from "./components/SystemSelector";
 import { AlphabetTabs, letterGroupOf } from "./components/AlphabetTabs";
 import { Pagination } from "./components/Pagination";
 import { LobbyScreen } from "./components/LobbyScreen";
+import { KeyboardSettings } from "./components/KeyboardSettings";
+import { buildKeyboardAppendConfigArgs } from "./keyboard/appendConfig";
 import "./styles/theme.css";
 
 const PAGE_SIZE = 50;
@@ -33,6 +35,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showKeyboardSettings, setShowKeyboardSettings] = useState(false);
   const [lobby, setLobby] = useState<{ mode: "host" | "client"; game: RomEntry } | null>(null);
   const [installingRetroArch, setInstallingRetroArch] = useState(false);
   const [playerCounts, setPlayerCounts] = useState<Record<string, number>>({});
@@ -181,10 +184,11 @@ export default function App() {
       await invoke("ensure_retroarch_installed");
       setInstallingRetroArch(false);
 
+      const keyboardArgs = await buildKeyboardAppendConfigArgs();
       await invoke("launch_emulator", {
         emulatorPath: system.emulator_path,
         romPath: rom.path,
-        extraArgs: system.extra_args,
+        extraArgs: [...system.extra_args, ...keyboardArgs],
       });
     } catch (e) {
       setError(String(e));
@@ -201,6 +205,9 @@ export default function App() {
         <div className="app-header__scan">
           <button className="btn-scan" onClick={() => setShowSettings((v) => !v)}>
             {showSettings ? "Fechar configurações" : "⚙ Consoles"}
+          </button>
+          <button className="btn-scan" onClick={() => setShowKeyboardSettings((v) => !v)}>
+            {showKeyboardSettings ? "Fechar teclado" : "⌨ Teclado"}
           </button>
           <button className="btn-scan" onClick={handleReindex} disabled={reindexing}>
             {reindexing ? (
@@ -246,6 +253,10 @@ export default function App() {
               setShowSettings(false);
             }}
           />
+        </main>
+      ) : showKeyboardSettings ? (
+        <main className="app-main">
+          <KeyboardSettings onClose={() => setShowKeyboardSettings(false)} />
         </main>
       ) : lobby ? (
         <main className="app-main">

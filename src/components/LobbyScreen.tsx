@@ -5,6 +5,7 @@ import { useLobbyClient } from "../lobby/useLobbyClient";
 import type { RomEntry, SystemDefinition } from "../types/rom";
 import type { ServerMessage } from "../types/lobby";
 import { systemLabel } from "./systemMeta";
+import { buildKeyboardAppendConfigArgs } from "../keyboard/appendConfig";
 
 interface Props {
   mode: "host" | "client";
@@ -104,11 +105,19 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
         throw new Error(`Você não tem "${gameName}" na sua biblioteca local — reindexe ou copie a rom.`);
       }
 
+      const keyboardArgs = await buildKeyboardAppendConfigArgs();
       await invoke("ensure_retroarch_installed");
       await invoke("launch_emulator", {
         emulatorPath: systemDef.emulator_path,
         romPath: localRom.path,
-        extraArgs: [...systemDef.extra_args, "--connect", resolvedHost ?? "127.0.0.1", "--port", String(hostPort)],
+        extraArgs: [
+          ...systemDef.extra_args,
+          "--connect",
+          resolvedHost ?? "127.0.0.1",
+          "--port",
+          String(hostPort),
+          ...keyboardArgs,
+        ],
       });
     } catch (e) {
       setLaunchError(String(e));

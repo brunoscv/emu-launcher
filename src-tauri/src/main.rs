@@ -3,6 +3,7 @@
 
 mod db;
 mod igdb;
+mod keyboard_config;
 mod launcher;
 mod library;
 mod lobby;
@@ -15,6 +16,7 @@ mod settings;
 mod systems;
 
 use igdb::enrich_player_counts;
+use keyboard_config::write_keyboard_config;
 use launcher::launch_emulator;
 use library::{get_system_configs, list_library, reindex_library, save_system_configs};
 use player_overrides::{get_player_counts, save_player_override};
@@ -59,7 +61,8 @@ fn main() {
             check_server_online,
             resolve_lobby_host,
             get_dedicated_server_host,
-            save_dedicated_server_host
+            save_dedicated_server_host,
+            write_keyboard_config
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri");

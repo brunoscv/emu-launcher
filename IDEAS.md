@@ -586,9 +586,11 @@ o `server.rs`/`lobby.rs`/`MultiplayerPanel.tsx` dos três.
 
 ---
 
-## 🔧 #009 — Configuração de controles (teclado/gamepad) pela nossa UI, não pelo menu do RetroArch
+## ✅ #009 — Configuração de controles (teclado/gamepad) pela nossa UI, não pelo menu do RetroArch
 
-**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026
+**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026 · **Implementada em:**
+11/08/2026 (compila limpo, testes automatizados passam — calibração em si ainda sem
+conferência visual do Bruno, é interação de teclado numa janela nativa).
 
 **A ideia:** o menu de configuração de input do próprio RetroArch é considerado confuso/
 difícil. Em vez de mandar o jogador configurar lá dentro, ter uma tela nossa (apertar cada
@@ -607,27 +609,36 @@ mecanismo que já existe e já foi validado na prática, só que hoje é feito �
 já resolve calibração de controle fisico; falta o equivalente pra teclado, que hoje não
 tem tela nenhuma (foi tudo feito hoje editando o `.cfg` direto por mim).
 
-### Plano técnico inicial
+### Plano técnico (implementado)
 
-1. **Tela nova "Configurar teclado"** — mesma mecânica do `GamepadCalibration.tsx` que já
-   existe (pede pra apertar cada botão do RetroPad um de cada vez, agora capturando
-   `KeyboardEvent` em vez de `Gamepad.buttons`), por jogador (P1/P2), persistido localmente
-   (mesmo padrão do `src/gamepad/storage.ts`, adaptado — ali é por `gamepad.id`, aqui pode
-   ser só "layout de teclado do player 1"/"do player 2", sem precisar de id de dispositivo).
-2. **Tabela de tradução `KeyboardEvent.code` → nome de tecla do RetroArch** — RetroArch usa
-   nomes próprios (`"left"`, `"s"`, `"enter"`, `"f1"`...), diferente do `code` do browser
-   (`"ArrowLeft"`, `"KeyS"`). Precisa de um mapa de tradução (~100 entradas, mas mecânico —
-   já vimos hoje na prática quais chaves o RetroArch espera, editando o `.cfg` à mão).
-3. **Geração do arquivo de config** — no momento de disparar `launch_emulator`, gerar um
-   `--appendconfig` com `input_player{N}_{botão} = "{tecla}"` pra cada player configurado
-   (mesmo mecanismo que `lobby.rs::write_headless_config` já usa pro host headless — só
-   que aqui é por jogador/local, não fixo pro modo headless).
-4. **Cuidado a registrar (aprendido na prática hoje):** existem hotkeys globais do
-   RetroArch (`input_hold_fast_forward`, `input_menu_toggle`, etc.) que **não são
-   por-player** — se uma tecla escolhida pra um botão de jogador colidir com uma hotkey
-   global, os dois disparam juntos (foi exatamente o bug do "avanço aleatório" do Player 2
-   que corrigimos hoje). A tela de configuração deveria **avisar/bloquear** teclas que já
-   são hotkey do sistema, não deixar o usuário escolher às cegas.
+1. **`src/keyboard/` (novo módulo, espelha `src/gamepad/`):** `types.ts` (reusa
+   `RetroPadButton`/`BUTTON_LABELS`/`CALIBRATION_ORDER` do gamepad, adiciona
+   `BUTTON_TO_SUFFIX` pra traduzir pro nome de chave do `retroarch.cfg`),
+   `retroarchKeyNames.ts` (`KEY_CODE_TO_RETROARCH` — tradução de `KeyboardEvent.code` pra
+   nome de tecla do RetroArch — e `RESERVED_HOTKEYS`), `storage.ts` (localStorage por
+   número de jogador, 1 ou 2, mesmo padrão do `gamepad/storage.ts`), `KeyboardCalibration.tsx`
+   (mesma mecânica de apertar botão-por-botão do `GamepadCalibration.tsx`, capturando
+   `KeyboardEvent`), `appendConfig.ts` (monta os args `--appendconfig` na hora de lançar).
+2. **`KeyboardSettings.tsx`** (novo) — tela "⌨ Teclado" no header, lista Player 1/Player 2
+   com status configurado/padrão, botão calibrar/limpar.
+3. **`keyboard_config.rs`** (novo, Rust) — command `write_keyboard_config` recebe o
+   mapeamento já traduzido (feito no TS) e só escreve o arquivo
+   `~/.local/share/emu-launcher/keyboard_session.cfg` — mesmo padrão do
+   `lobby.rs::write_headless_config`. Chamado em `App.tsx::handlePlay` e
+   `LobbyScreen.tsx::handleMatchStarting`, sempre; sem nenhum jogador configurado devolve
+   `[]` e não muda nada do comportamento padrão do RetroArch.
+4. **Proteção contra colisão com hotkey global, aplicada de verdade:** `RESERVED_HOTKEYS`
+   bloqueia na hora de apertar a tecla (mensagem de aviso, não deixa avançar o passo) —
+   é exatamente o tipo de bug que causou o "avanço aleatório" do Player 2 durante os
+   testes de multiplayer de hoje (tecla "L" ao mesmo tempo botão A do jogador e hotkey
+   `input_hold_fast_forward`). Também bloqueia reusar a mesma tecla duas vezes dentro do
+   mesmo mapeamento.
+
+**Limitação conhecida:** `RESERVED_HOTKEYS` é uma lista fixa dos hotkeys padrão de fábrica
+do RetroArch 1.22.2 (a versão que `ensure_retroarch_installed` sempre instala) — se algum
+dia o Bruno mudar os hotkeys manualmente pelo menu do próprio RetroArch, essa lista fica
+desatualizada (não lê o `retroarch.cfg` de verdade pra conferir). Não crítico agora — a
+instalação é sempre gerenciada e ninguém mexeu nos hotkeys nativos.
 
 **Depende de:** nada bloqueante — pode ser feito independente do #008.
 
