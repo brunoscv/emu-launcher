@@ -402,13 +402,15 @@ mod tests {
 
         let match_starting_msg = host_ws.next().await.unwrap().unwrap();
         let parsed: ServerMessage = serde_json::from_str(match_starting_msg.to_text().unwrap()).unwrap();
-        let ServerMessage::MatchStarting { host_port, system, game_name } = parsed else {
+        let ServerMessage::MatchStarting { host_port, system, game_name, device_number } = parsed else {
             panic!("esperava MatchStarting, veio: {parsed:?}");
         };
 
         assert_eq!(host_port, 55435);
         assert_eq!(system, game.system);
         assert_eq!(game_name, game.name);
+        // host (primeiro a entrar, índice 0 na sala) é sempre device 1
+        assert_eq!(device_number, 1);
 
         println!("RetroArch host disparado de verdade — system={system} game={game_name} port={host_port}");
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;

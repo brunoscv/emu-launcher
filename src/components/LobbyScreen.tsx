@@ -44,7 +44,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     if (msg.type === "joined") setMyPlayerId(msg.player_id);
     if (msg.type === "match_starting" && !startedRef.current) {
       startedRef.current = true;
-      handleMatchStarting(msg.host_port, msg.system, msg.game_name);
+      handleMatchStarting(msg.host_port, msg.system, msg.game_name, msg.device_number);
     }
     if (msg.type === "error") setSetupError(msg.message);
   }
@@ -90,7 +90,12 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, phase]);
 
-  async function handleMatchStarting(hostPort: number, system: string, gameName: string) {
+  async function handleMatchStarting(
+    hostPort: number,
+    system: string,
+    gameName: string,
+    deviceNumber: number
+  ) {
     setLaunchError(null);
     setLaunching(true);
     try {
@@ -106,7 +111,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
         throw new Error(`Você não tem "${gameName}" na sua biblioteca local — reindexe ou copie a rom.`);
       }
 
-      const keyboardArgs = await buildKeyboardAppendConfigArgs();
+      const keyboardArgs = await buildKeyboardAppendConfigArgs(deviceNumber);
       await invoke("ensure_retroarch_installed");
       const result = await invoke<LaunchResult>("launch_emulator", {
         emulatorPath: systemDef.emulator_path,

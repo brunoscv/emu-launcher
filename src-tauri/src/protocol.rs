@@ -47,9 +47,21 @@ pub enum ServerMessage {
     /// pelo `system` + `game_name` (mesmo `systems::list_systems()` que já
     /// usa hoje) e conecta em `--connect <ip_do_servidor> --port host_port`
     /// — o IP já é o mesmo que ele usou pra conectar no lobby.
+    ///
+    /// `device_number` (1-based, mandado individualmente pra cada jogador,
+    /// não é o mesmo valor pra todo mundo): o host do RetroArch é sempre
+    /// headless (ninguém senta nele) mas o netplay, sem "Request Device"
+    /// nenhum configurado, atribui automaticamente device 1 pro HOST e
+    /// device 2 em diante pros clientes que vão conectando — ou seja, o
+    /// dispositivo 1 nunca teria ninguém de verdade. Cada cliente usa esse
+    /// número pra mandar `netplay_request_device_p{N} = "true"` no próprio
+    /// `--appendconfig`, reivindicando o slot certo em vez de cair no
+    /// auto-assign (bug real descoberto 11/08/2026: config de teclado
+    /// certinha, mas ninguém "sentado" na porta que a config afetava).
     MatchStarting {
         host_port: u16,
         system: String,
         game_name: String,
+        device_number: u8,
     },
 }

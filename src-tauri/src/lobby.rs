@@ -205,14 +205,24 @@ pub async fn start_match(rooms: Rooms, code: String, game: RomEntry, max_players
     match result {
         Ok((host_port, host_pid)) => {
             room.host_pid = host_pid;
-            broadcast_message(
-                room,
-                &ServerMessage::MatchStarting {
+            // Mensagem individual, não broadcast — cada jogador recebe um
+            // device_number diferente (posição na sala + 1). O host do
+            // RetroArch é sempre headless (sem ninguém sentado nele) — ao
+            // pedir "Request Device" explicitamente em vez de deixar o
+            // auto-assign padrão do netplay (que reservaria o device 1 pro
+            // host de qualquer jeito, mesmo vazio), os humanos ocupam os
+            // devices 1..max_players direto, sem desperdiçar nenhuma porta
+            // controlável com ninguém nela.
+            for (index, player) in room.players.iter().enumerate() {
+                let message = ServerMessage::MatchStarting {
                     host_port,
-                    system: game.system,
-                    game_name: game.name,
-                },
-            )
+                    system: game.system.clone(),
+                    game_name: game.name.clone(),
+                    device_number: (index + 1) as u8,
+                };
+                let text = serde_json::to_string(&message).unwrap_or_default();
+                let _ = player.tx.send(Message::text(text));
+            }
         }
         Err(e) => {
             room.started = false; // permite tentar de novo (ex: desmarca e marca pronto de novo)

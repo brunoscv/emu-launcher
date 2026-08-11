@@ -23,7 +23,13 @@ export type ServerMessage =
     }
   | { type: "error"; message: string }
   | { type: "joined"; player_id: string }
-  | { type: "match_starting"; host_port: number; system: string; game_name: string };
+  | {
+      type: "match_starting";
+      host_port: number;
+      system: string;
+      game_name: string;
+      device_number: number;
+    };
 
 /** Porta fixa do WebSocket de lobby — ver PORT em src-tauri/src/server.rs. */
 export const LOBBY_PORT = 7777;
