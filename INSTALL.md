@@ -45,12 +45,17 @@ cd emu-launcher
 git checkout EMU-001   # o trabalho de multiplayer ainda não foi mergeado na main
 
 npm install
-npm run build
-
-cd src-tauri
-cargo build --release   # --release: mais lento pra compilar, mais rápido pra rodar —
-                         # vale a pena pra algo que vai ficar no ar continuamente
+npm run tauri build -- --no-bundle   # NÃO use "cargo build --release" puro — ver nota abaixo
 ```
+
+**Por que `npm run tauri build`, não `cargo build --release` direto:** o Tauri v2 só embute
+o frontend (`dist/`) no binário quando compilado com a feature `custom-protocol` do crate
+`tauri` — um `cargo build --release` cru não ativa isso, e o app abre com tela branca
+tentando conectar no servidor de desenvolvimento do Vite (que não existe fora do `npm run
+dev`). Bug real encontrado montando esse guia (11/08/2026): o binário abria, mas sem
+nenhum layout, com erro "Could not connect to 127.0.0.1: Connection refused". `tauri build`
+resolve isso sozinho, ativando a feature certa. `--no-bundle` pula empacotar AppImage/deb —
+só queremos o binário solto em `target/release/`.
 
 A primeira build demora bastante (alguns minutos) — compila o SQLite embutido
 (`rusqlite` bundled), o cliente HTTP (`reqwest`), WebSocket (`tokio-tungstenite`) e o
@@ -81,10 +86,11 @@ instantâneas.
 
 ## 4. Indexar as ROMs do servidor
 
-O servidor precisa da própria biblioteca indexada — é dela que as salas listam os jogos
-disponíveis pra criar sala (ver `IDEAS.md` #007: "a lista de jogos vem sempre da
-biblioteca do próprio servidor", nunca da de quem está criando a sala). Isso ainda não
-tem um comando de linha; por enquanto, configure pelo modo desktop:
+O servidor precisa da própria biblioteca indexada — quando alguém clica "Host" e a sala é
+delegada pra esse servidor dedicado, ele resolve o jogo por nome+sistema na PRÓPRIA
+biblioteca (ver `IDEAS.md` #007/#008), não na de quem clicou — precisa ter a mesma rom
+indexada aqui, mesmo que em pasta diferente. Isso ainda não tem um comando de linha; por
+enquanto, configure pelo modo desktop:
 
 1. Copie as ROMs que você quer disponibilizar pra essa máquina (ex: `~/roms/snes/`).
 2. Rode o app **sem** `--server` uma vez (`./target/release/emu-launcher`) — abre a GUI
@@ -124,8 +130,7 @@ nohup ./target/release/emu-launcher --server > server.log 2>&1 &
 ```bash
 git pull
 npm install
-npm run build
-cd src-tauri && cargo build --release
+npm run tauri build -- --no-bundle
 ```
 
 (Se a build já estava rodando, mate o processo antigo e suba o novo binário — sem
@@ -133,6 +138,11 @@ downtime automático ainda, é manual por enquanto.)
 
 ## Verificação rápida
 
-Do notebook cliente, na tela "🎮 Multiplayer" do app desktop, digite o IP dessa máquina no
-campo "IP do servidor" e clique "Conectar" — se a lista de jogos do servidor aparecer,
-está tudo funcionando.
+Não existe mais uma tela genérica "🎮 Multiplayer" pra digitar IP — o fluxo é por jogo
+(`IDEAS.md` #008): do notebook cliente, configure em "⚙ Consoles" → "Servidor dedicado" o
+IP dessa máquina (opcional, mas evita digitar o IP toda vez). Depois, no notebook, passe o
+mouse numa linha de jogo que essa máquina também tem indexado e clique **"Host"** — se a
+tela de lobby abrir com um código de sala, o servidor dedicado respondeu e está tudo
+funcionando (se a máquina do servidor estivesse offline, o próprio notebook viraria
+lobby+host local em vez disso — não é esse teste). Compartilhe o código com outro jogador,
+que clica **"Cliente"** no mesmo jogo pra entrar.

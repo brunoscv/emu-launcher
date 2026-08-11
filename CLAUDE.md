@@ -140,13 +140,16 @@ cada fase em `IDEAS.md` #003-#007 (e #001, que amarra tudo na UI no final).
    `ensure_retroarch_installed` valida do e baixa/extrai/dá permissão de execução —
    validado ao vivo no Linux (download real + AppImage rodando). Windows implementado mas
    ainda sem teste numa máquina real.
-2. ✅ **Fase 2 — Metadata de "número de jogadores" por jogo** — `IDEAS.md` #004. Override
-   manual (tabela SQLite + seletor "👥" na `GameList`) e busca automática via **IGDB**
-   (trocado de ScreenScraper — cadastro instantâneo, sem aprovação manual) implementados e
-   validados com chamada real (Superstar Soccer Deluxe → 4 jogadores, batendo com o
-   Multitap). Credenciais em `.env` na raiz (gitignored), busca disparada pelo botão "👥
-   Buscar jogadores (IGDB)", separada do reindex normal por ser mais lenta (rate limit da
-   API).
+2. ✅ **Fase 2 — Metadata de "número de jogadores" por jogo** — `IDEAS.md` #004 (revisado no
+   #010). Busca automática via **IGDB** (trocado de ScreenScraper — cadastro instantâneo,
+   sem aprovação manual), validada com chamada real (Superstar Soccer Deluxe → 4
+   jogadores, batendo com o Multitap). Credenciais em `.env` na raiz (gitignored), busca
+   disparada pelo botão "👥 Buscar jogadores (IGDB)", separada do reindex normal por ser
+   mais lenta (rate limit da API). **Revisão #010 (11/08/2026):** o seletor manual "👥"
+   saiu da `GameList` — virou um badge somente-leitura. A tabela de override manual
+   (`game_player_overrides`) continua existindo, só que sem tela: corrigir um jogo errado
+   agora é editar a tabela direto no SQLite. Jogo com IGDB já verificado e sem multiplayer
+   nenhum vira "1 jogador" de verdade (esconde os botões Host/Cliente, ver Fase 5).
 3. ✅ **Fase 3 — Prova de conceito: RetroArch headless no PC dedicado** — `IDEAS.md` #005.
    Testado de verdade pelo Bruno (PC dedicado + notebook): conectou, jogou, ping 15ms, sem
    crash. Lição aprendida: o primeiro teste falhou por descompasso de versão porque usou
@@ -155,21 +158,35 @@ cada fase em `IDEAS.md` #003-#007 (e #001, que amarra tudo na UI no final).
    nunca um binário solto do PATH/sistema, nem no host nem no cliente.
 4. **Fase 4 — Acesso pela internet** — `IDEAS.md` #006. Port-forward + DDNS no roteador
    do Bruno como caminho preferido; VPN (Tailscale) como plano B.
-5. 🚧 **Fase 5 — Servidor de lobby multiplayer** — `IDEAS.md` #007. Rust no mesmo projeto,
-   `--server` pula o Tauri/GTK inteiramente (validado sem monitor no PC dedicado). Cortes
-   5a (transporte), 5b (protocolo de sala), 5c (dispara o RetroArch host de verdade quando
-   a sala completa) e 5d (tela "🎮 Multiplayer" no `App.tsx`, `MultiplayerPanel.tsx` +
-   `useLobbyClient.ts`) **implementados**. Protocolo e disparo do host validados com
-   processo real subindo/carregando a ROM; a UI em si ainda não teve conferência visual
-   (sem ferramenta de automação de janela nativa — precisa do Bruno clicar e testar).
-   Risco em aberto: Multitap (3-4 jogadores) via netplay tem uma issue de 2020 não
-   confirmada na versão atual — Bruno vai validar com um 3º PC (Windows, também valida o
-   instalador de Windows da Fase 1 pela primeira vez). Corrigido um bug real: o disparo do
-   host não chamava `ensure_retroarch_installed` antes de lançar (só o cliente desktop
-   fazia isso) — teria falhado num PC dedicado limpo. Passo a passo de instalação no PC
-   dedicado documentado em [`INSTALL.md`](./INSTALL.md).
-6. **Fase 6 — Modo Standalone vs. Servidor na UI** — `IDEAS.md` #001. Toggle + indicador de
-   conexão; só fica trivial depois que as fases 1-5 existirem.
+5. ✅ **Fase 5 — Servidor de lobby multiplayer** — `IDEAS.md` #007. Cortes 5a (transporte),
+   5b (protocolo de sala), 5c (dispara o RetroArch host de verdade quando a sala completa)
+   e 5d (UI do cliente) **implementados e validados de ponta a ponta** — partida real
+   jogada entre duas máquinas (esse PC + o notebook de teste), com "Pronto" dos dois lados
+   disparando o RetroArch host de verdade. No caminho, dois bugs reais achados e
+   corrigidos: `config_save_on_exit` do RetroArch vazando os drivers `null` do host
+   headless de volta pro `retroarch.cfg` compartilhado (contaminava o cliente também) e uma
+   tecla de jogador colidindo com uma hotkey global do RetroArch (`input_hold_fast_forward`
+   — causava os "avanços" aleatórios de vídeo).
+
+   **Revisão #008 (11/08/2026) — UX mudou de "conectar num servidor" pra "Host/Cliente por
+   jogo":** a tela genérica "🎮 Multiplayer" (`MultiplayerPanel.tsx`) foi substituída por
+   botões **Host**/**Cliente** direto em cada linha da `GameList` (`LobbyScreen.tsx`, novo).
+   Clicar "Host" resolve sozinho pra onde conectar (`resolve_lobby_host`, `server.rs`): usa
+   o servidor dedicado configurado em "⚙ Consoles" se estiver online, senão a própria
+   instância desktop de quem clicou vira lobby + host embutidos (`ensure_embedded_running`,
+   roda no runtime async que o Tauri já mantém — não precisa de um segundo processo). O
+   modo `--server` dedicado (headless, sem GUI) continua existindo pro PC dedicado — ver
+   `INSTALL.md` — mas deixou de ser pré-requisito pra jogar com um amigo.
+
+   **Riscos em aberto (sem mudança):** Multitap (3-4 jogadores) via netplay tem uma issue
+   de 2020 não confirmada na versão atual — ainda não testado com um 3º PC. Acesso pela
+   internet (Fase 4) também segue pendente — tudo validado até aqui foi em LAN/localhost.
+6. ✅ **Fase 6 — Modo Standalone vs. Servidor na UI** — `IDEAS.md` #001, resolvida de um
+   jeito diferente do planejado originalmente: em vez de um toggle manual "Jogar sozinho"/
+   "Conectar ao servidor" + badge de conexão, o #008 (Fase 5, acima) faz essa escolha
+   sozinho a cada clique em "Host" (servidor dedicado se estiver online, senão modo
+   embutido local) — sem nenhum estado de "modo" pra alternar na UI. "Jogar" (solo) nunca
+   dependeu de rede, isso não mudou.
 7. **Fase 7 — Deploy real no PC dedicado** — clonar o repo lá, rodar em modo servidor
    (headless, sem GUI), manter no ar (ex: serviço systemd).
 
