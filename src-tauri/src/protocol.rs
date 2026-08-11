@@ -1,9 +1,7 @@
 use crate::scanner::RomEntry;
 use serde::{Deserialize, Serialize};
 
-/// Mensagens que o cliente manda pro servidor de lobby (Fase 5b, ver
-/// IDEAS.md #007). Ainda sem disparo de RetroArch — só sala: listar jogos
-/// (da biblioteca do próprio servidor), criar, entrar, marcar pronto.
+/// Mensagens que o cliente manda pro servidor de lobby (ver IDEAS.md #007).
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
@@ -31,4 +29,14 @@ pub enum ServerMessage {
         players: Vec<PlayerView>,
     },
     Error { message: String },
+    /// Sala completou (cheia + todos prontos) e o servidor já disparou o
+    /// RetroArch host (Fase 5c). O cliente resolve o core/rom localmente
+    /// pelo `system` + `game_name` (mesmo `systems::list_systems()` que já
+    /// usa hoje) e conecta em `--connect <ip_do_servidor> --port host_port`
+    /// — o IP já é o mesmo que ele usou pra conectar no lobby.
+    MatchStarting {
+        host_port: u16,
+        system: String,
+        game_name: String,
+    },
 }

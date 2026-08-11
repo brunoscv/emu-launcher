@@ -1,12 +1,19 @@
+use crate::launcher;
 use crate::library;
 use crate::player_overrides;
 use crate::protocol::{PlayerView, ServerMessage};
 use crate::scanner::RomEntry;
+use crate::systems;
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::tungstenite::Message;
+
+/// Porta padrão de netplay do próprio RetroArch (não confundir com a 7777
+/// do nosso WebSocket de lobby). Fixa por enquanto — o servidor só hospeda
+/// uma partida por vez nesse corte (ver nota em `launch_host`).
+const NETPLAY_PORT: u16 = 55435;
 
 pub struct Player {
     pub id: String,
@@ -20,6 +27,7 @@ pub struct Room {
     pub game: RomEntry,
     pub max_players: i64,
     pub players: Vec<Player>,
+    pub started: bool,
 }
 
 /// Estado do lobby inteiro — em memória, de propósito: salas são efêmeras,
@@ -77,10 +85,100 @@ fn room_state_message(room: &Room) -> ServerMessage {
     }
 }
 
-fn broadcast(room: &Room) {
-    let text = serde_json::to_string(&room_state_message(room)).unwrap_or_default();
+fn broadcast_message(room: &Room, message: &ServerMessage) {
+    let text = serde_json::to_string(message).unwrap_or_default();
     for player in &room.players {
         let _ = player.tx.send(Message::text(text.clone()));
+    }
+}
+
+fn broadcast(room: &Room) {
+    broadcast_message(room, &room_state_message(room));
+}
+
+fn headless_config_path() -> Result<std::path::PathBuf, String> {
+    let mut dir = dirs::data_dir().ok_or("Não foi possível localizar o diretório de dados do usuário")?;
+    dir.push("emu-launcher");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    dir.push("server_session.cfg");
+    Ok(dir)
+}
+
+/// `video_driver`/`audio_driver = "null"` pro host rodar sem tela (validado
+/// na prática na Fase 3/#005). Multitap do SNES (`input_libretro_device_p2 =
+/// "257"`, device id confirmado na documentação) só entra quando o jogo
+/// pede mais de 2 jogadores — não faz sentido pra partida 1x1.
+fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String> {
+    let path = headless_config_path()?;
+    let mut contents = String::from("video_driver = \"null\"\naudio_driver = \"null\"\n");
+    if max_players > 2 {
+        contents.push_str("input_libretro_device_p2 = \"257\"\n");
+    }
+    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// Dispara o RetroArch host de verdade pra sala. Sempre via
+/// `systems::list_systems()` (que por sua vez usa
+/// `retroarch::expected_installation()`) — nunca um binário solto do PATH,
+/// é a lição que a Fase 3/#005 deixou clara.
+///
+/// Limitação conhecida deste corte: porta de netplay e arquivo de config
+/// são fixos (`NETPLAY_PORT`, `server_session.cfg`) — o servidor hospeda
+/// uma partida por vez. Rodar duas salas completando ao mesmo tempo não é
+/// suportado ainda; não é o cenário de uso atual (Bruno + amigos numa
+/// partida por vez), mas fica registrado pra quando/se importar.
+fn launch_host(room: &Room) -> Result<u16, String> {
+    let system_def = systems::list_systems()?
+        .into_iter()
+        .find(|s| s.id == room.game.system)
+        .ok_or_else(|| format!("Nenhum emulador configurado pro sistema \"{}\"", room.game.system))?;
+
+    let cfg_path = write_headless_config(room.max_players)?;
+
+    let mut args = system_def.extra_args.clone();
+    args.push("--host".to_string());
+    args.push("--port".to_string());
+    args.push(NETPLAY_PORT.to_string());
+    args.push("--appendconfig".to_string());
+    args.push(cfg_path.to_string_lossy().to_string());
+
+    launcher::spawn_emulator(&system_def.emulator_path, &room.game.path, &args, |exit_code| {
+        println!("RetroArch host encerrou (exit code {exit_code:?})");
+    })?;
+
+    Ok(NETPLAY_PORT)
+}
+
+/// Chamado depois de qualquer mudança de prontidão. Só dispara quando a
+/// sala está cheia (todos os assentos de `max_players` ocupados) e todo
+/// mundo marcou pronto — e só uma vez (`room.started`).
+fn maybe_start_match(room: &mut Room) {
+    if room.started {
+        return;
+    }
+    if (room.players.len() as i64) < room.max_players {
+        return;
+    }
+    if !room.players.iter().all(|p| p.ready) {
+        return;
+    }
+
+    room.started = true;
+
+    match launch_host(room) {
+        Ok(host_port) => broadcast_message(
+            room,
+            &ServerMessage::MatchStarting {
+                host_port,
+                system: room.game.system.clone(),
+                game_name: room.game.name.clone(),
+            },
+        ),
+        Err(e) => {
+            room.started = false; // permite tentar de novo (ex: usuário desmarca e marca pronto de novo)
+            broadcast_message(room, &ServerMessage::Error { message: e });
+        }
     }
 }
 
@@ -119,6 +217,7 @@ pub fn create_room(
             ready: false,
             tx,
         }],
+        started: false,
     };
 
     broadcast(&room);
@@ -166,6 +265,7 @@ pub fn set_ready(rooms: &Rooms, code: &str, player_id: &str, ready: bool) -> Res
     player.ready = ready;
 
     broadcast(room);
+    maybe_start_match(room);
     Ok(())
 }
 

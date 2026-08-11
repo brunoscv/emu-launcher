@@ -156,12 +156,14 @@ cada fase em `IDEAS.md` #003-#007 (e #001, que amarra tudo na UI no final).
 4. **Fase 4 — Acesso pela internet** — `IDEAS.md` #006. Port-forward + DDNS no roteador
    do Bruno como caminho preferido; VPN (Tailscale) como plano B.
 5. 🚧 **Fase 5 — Servidor de lobby multiplayer** — `IDEAS.md` #007. Rust no mesmo projeto,
-   `--server` pula o Tauri/GTK inteiramente (validado sem monitor no PC dedicado). Corte 5a
-   (transporte WebSocket) e 5b (protocolo de sala: criar/entrar/pronto, `protocol.rs` +
-   `lobby.rs` + `server.rs`) **implementados e testados**. Falta o corte 5c — atribuir
-   porta/Multitap e disparar o RetroArch host de verdade (Fase 3) quando a sala completa
-   prontidão — e a UI do lado do cliente (hoje só existe protocolo de servidor, testado via
-   cliente Rust de teste).
+   `--server` pula o Tauri/GTK inteiramente (validado sem monitor no PC dedicado). Cortes
+   5a (transporte), 5b (protocolo de sala) e 5c (dispara o RetroArch host de verdade quando
+   a sala completa — testado com processo real subindo e carregando a ROM)
+   **implementados e testados**. Risco em aberto: Multitap (3-4 jogadores) via netplay tem
+   uma issue de 2020 não confirmada na versão atual — Bruno vai validar com um 3º PC
+   (Windows, também valida o instalador de Windows da Fase 1 pela primeira vez). Falta a UI
+   do lado do cliente (hoje só existe protocolo de servidor, testado via cliente Rust de
+   teste).
 6. **Fase 6 — Modo Standalone vs. Servidor na UI** — `IDEAS.md` #001. Toggle + indicador de
    conexão; só fica trivial depois que as fases 1-5 existirem.
 7. **Fase 7 — Deploy real no PC dedicado** — clonar o repo lá, rodar em modo servidor

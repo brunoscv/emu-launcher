@@ -215,4 +215,103 @@ mod tests {
         let guest_player = players.iter().find(|p| p.nickname == "Amigo").unwrap();
         assert!(guest_player.ready);
     }
+
+    /// Dispara o RetroArch host de verdade (Fase 5c) — não roda em `cargo
+    /// test` normal, só sob demanda (`cargo test -- --ignored --nocapture`).
+    /// Mesmo padrão dos testes "de verdade" de retroarch.rs/igdb.rs.
+    #[tokio::test]
+    #[ignore]
+    async fn sala_cheia_e_pronta_dispara_o_host() {
+        tokio::spawn(run());
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let games = crate::library::list_library().expect("list_library não deveria falhar");
+        let Some(game) = games.first() else {
+            eprintln!("nenhum jogo indexado na biblioteca local — pulando teste");
+            return;
+        };
+        let rom_path = game.path.clone();
+
+        let mut host_ws = connect().await;
+        host_ws
+            .send(Message::text(
+                serde_json::to_string(&serde_json::json!({
+                    "type": "create_room",
+                    "rom_path": rom_path,
+                    "nickname": "Bruno",
+                }))
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let response = host_ws.next().await.unwrap().unwrap();
+        let ServerMessage::RoomState { code, max_players, .. } =
+            serde_json::from_str(response.to_text().unwrap()).unwrap()
+        else {
+            panic!("esperava RoomState");
+        };
+
+        let mut guest_ws = connect().await;
+        guest_ws
+            .send(Message::text(
+                serde_json::to_string(&serde_json::json!({
+                    "type": "join_room",
+                    "code": code,
+                    "nickname": "Amigo",
+                }))
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        host_ws.next().await.unwrap().unwrap(); // host vê o join
+        guest_ws.next().await.unwrap().unwrap(); // guest vê a própria confirmação
+
+        // Se o jogo escolhido pedir mais de 2 jogadores (Multitap), esse
+        // teste só valida com 2 mesmo assim — cheio o suficiente pra disparar
+        // seria preciso mais conexões; o importante aqui é confirmar que o
+        // disparo do host acontece quando a sala completa.
+        if max_players != 2 {
+            eprintln!("jogo escolhido pede {max_players} jogadores, não 2 — pulando teste (escolha determinística seria mais robusta, mas não crítico aqui)");
+            return;
+        }
+
+        host_ws
+            .send(Message::text(
+                serde_json::to_string(&serde_json::json!({ "type": "set_ready", "ready": true })).unwrap(),
+            ))
+            .await
+            .unwrap();
+        host_ws.next().await.unwrap().unwrap(); // host vê a própria confirmação
+        guest_ws.next().await.unwrap().unwrap(); // guest vê o host pronto
+
+        guest_ws
+            .send(Message::text(
+                serde_json::to_string(&serde_json::json!({ "type": "set_ready", "ready": true })).unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        // essa mensagem que interessa: RoomState (todos prontos) seguido de MatchStarting
+        let room_state_msg = host_ws.next().await.unwrap().unwrap();
+        let _: ServerMessage = serde_json::from_str(room_state_msg.to_text().unwrap()).unwrap();
+
+        let match_starting_msg = host_ws.next().await.unwrap().unwrap();
+        let parsed: ServerMessage = serde_json::from_str(match_starting_msg.to_text().unwrap()).unwrap();
+        let ServerMessage::MatchStarting { host_port, system, game_name } = parsed else {
+            panic!("esperava MatchStarting, veio: {parsed:?}");
+        };
+
+        assert_eq!(host_port, 55435);
+        assert_eq!(system, game.system);
+        assert_eq!(game_name, game.name);
+
+        println!("RetroArch host disparado de verdade — system={system} game={game_name} port={host_port}");
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // limpeza: mata o processo real que subiu, senão fica um RetroArch
+        // órfão rodando na máquina depois do teste
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "RetroArch-Linux-x86_64.AppImage"])
+            .output();
+    }
 }

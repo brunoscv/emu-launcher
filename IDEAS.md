@@ -330,18 +330,54 @@ RetroArch (isso é o próximo corte, 5c).
   entra, marca pronto — confirma o broadcast chegando nos dois lados em cada passo, contra
   a biblioteca SQLite real (1924 jogos de SNES já indexados), sem mock.
 
+### Corte 5c — dispara o RetroArch host quando a sala completa (✅ implementado)
+
+Quando a sala fica cheia (`players.len() == max_players`) e todo mundo marca pronto, o
+servidor monta a config headless — `video_driver`/`audio_driver = "null"` (Fase 3/#005) +
+`input_libretro_device_p2 = "257"` (Multitap do SNES, **só quando o jogo pede mais de 2
+jogadores** — device id confirmado na documentação do libretro) — e dispara o RetroArch em
+`--host --port 55435 --appendconfig ...`, sempre via `systems::list_systems()` (que usa
+`retroarch::expected_installation()`, nunca um binário solto — lição da Fase 3). Depois
+disso, `ServerMessage::MatchStarting { host_port, system, game_name }` é anunciado pra sala
+inteira; cada cliente resolve seu próprio core/rom local (mesmo `systems::list_systems()`
+que já usa hoje) e conecta com `--connect <ip>` — o IP já é o mesmo que usou pra falar com
+o lobby.
+
+**Refatoração que isso exigiu:** `launcher.rs` tinha `launch_emulator` como
+`#[tauri::command]` recebendo um `AppHandle` (só existe no modo desktop) — extraído o
+núcleo (`spawn_emulator`, sem `AppHandle`, recebe um closure `on_exit` genérico) reusado
+tanto pelo command Tauri (emite evento pra UI) quanto pelo servidor (só loga).
+
+**Validado com teste automatizado real** (`server::tests::sala_cheia_e_pronta_dispara_o_host`,
+`#[ignore]`, mesmo padrão dos outros testes "de verdade" do projeto): sobe o servidor,
+cria sala, dois clientes reais marcam pronto, confirma que o `MatchStarting` chega — e o
+RetroArch host **realmente sobe** (log confirmado: `Map_LoROMMap` do snes9x carregando a
+ROM, hospedando netplay na porta 55435). Fecha sozinho pouco depois por não ter cliente de
+netplay de verdade conectando nesse teste isolado — comportamento esperado, a sessão
+completa com cliente real já foi validada manualmente na Fase 3.
+
+### Risco em aberto: Multitap (3-4 jogadores) via netplay
+
+Achei uma issue aberta desde 2020 no GitHub do RetroArch (#10424) relatando que o Multitap
+do SNES não registra input pro 3º jogador via netplay, afetando tanto `snes9x` quanto
+`bsnes`. Pode já estar corrigido (o código de netplay mudou bastante desde então — mesmo
+padrão da issue de crash que não se confirmou na Fase 3), mas só um teste de verdade decide.
+**Ainda não testado** — Bruno vai validar com um 3º PC (notebook Windows, também serve pra
+validar o instalador em Windows pela primeira vez, pendência da Fase 1) assim que possível.
+O código do 5c não muda dependendo do resultado (funciona igual pra 2 ou 4 jogadores — o
+Multitap é só uma linha a mais na config); o risco é inteiramente do lado do RetroArch, não
+do nosso código.
+
 ### Próximos cortes (ainda não implementados)
 
-1. **Corte 5c** — atribuição de porta/Multitap ao completar prontidão dentro do limite do
-   jogo → dispara `launch_emulator` no servidor em modo host apontando pro core certo
-   (sempre via `retroarch::expected_installation()`, nunca um binário solto — lição da
-   Fase 3/#005). Cada cliente (Bruno e amigos) conecta no host via RetroArch nativo assim
-   que a partida é anunciada como pronta.
-2. UI do lado do cliente (App.tsx) pra criar/entrar em sala, ver a sala de espera e marcar
-   pronto — hoje só existe o protocolo no servidor, testado via cliente Rust de teste.
+1. UI do lado do cliente (App.tsx) pra criar/entrar em sala, ver a sala de espera e marcar
+   pronto, e reagir ao `MatchStarting` chamando o `launch_emulator` local com
+   `--connect`/`--port` — hoje só existe o protocolo no servidor, testado via cliente Rust
+   de teste; o cliente real ainda conecta manualmente por linha de comando.
+2. Validar Multitap de verdade (3-4 jogadores reais) — ver risco acima.
 
 **Depende de:** #003, #004, #005 (implementados) e #006 (acesso pela internet, ainda não
-feito — o corte de hoje só foi testado em LAN/localhost).
+feito — os cortes de hoje só foram testados em LAN/localhost).
 
 ---
 
