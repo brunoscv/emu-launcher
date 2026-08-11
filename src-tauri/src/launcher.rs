@@ -2,6 +2,29 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::process::Command;
 
+/// Mata um processo pelo PID (RetroArch, host ou cliente) — usado tanto
+/// pelo command Tauri `kill_emulator` (frontend, "Sair da sala") quanto
+/// internamente por `lobby.rs` (host esquecido rodando quando a sala
+/// esvazia). Sem retentar `Child` nenhum — `spawn_emulator` já dispara o
+/// processo em modo fire-and-forget (só monitora a saída numa task), então
+/// matar por PID via comando do SO é mais simples que replumbing pra
+/// guardar o `Child` em algum lugar acessível depois.
+pub fn kill_pid(pid: u32) -> Result<(), String> {
+    #[cfg(unix)]
+    let result = std::process::Command::new("kill").args(["-9", &pid.to_string()]).output();
+    #[cfg(windows)]
+    let result = std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .output();
+
+    result.map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn kill_emulator(pid: u32) -> Result<(), String> {
+    kill_pid(pid)
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct LaunchResult {
     pub started: bool,

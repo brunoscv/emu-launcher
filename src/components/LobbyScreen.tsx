@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useLobbyClient } from "../lobby/useLobbyClient";
-import type { RomEntry, SystemDefinition } from "../types/rom";
+import type { RomEntry, SystemDefinition, LaunchResult } from "../types/rom";
 import type { ServerMessage } from "../types/lobby";
 import { systemLabel } from "./systemMeta";
 import { buildKeyboardAppendConfigArgs } from "../keyboard/appendConfig";
@@ -37,6 +37,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const startedRef = useRef(false);
+  const emulatorPidRef = useRef<number | null>(null);
 
   function handleLobbyMessage(msg: ServerMessage) {
     if (msg.type === "room_state") setRoomState(msg);
@@ -107,7 +108,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
 
       const keyboardArgs = await buildKeyboardAppendConfigArgs();
       await invoke("ensure_retroarch_installed");
-      await invoke("launch_emulator", {
+      const result = await invoke<LaunchResult>("launch_emulator", {
         emulatorPath: systemDef.emulator_path,
         romPath: localRom.path,
         extraArgs: [
@@ -119,6 +120,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           ...keyboardArgs,
         ],
       });
+      emulatorPidRef.current = result.pid;
     } catch (e) {
       setLaunchError(String(e));
     } finally {
@@ -134,6 +136,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   useEffect(() => {
     const unlistenPromise = listen("emulator-closed", () => {
       startedRef.current = false;
+      emulatorPidRef.current = null;
       if (roomStateRef.current) send({ type: "set_ready", ready: false });
     });
     return () => {
@@ -148,6 +151,14 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   }
 
   function handleClose() {
+    // Mata o RetroArch local que essa sala disparou (se ainda tiver algum)
+    // — senão fica um processo órfão rodando, causando exatamente a
+    // confusão de "abri o app e caiu numa sessão antiga" (bug real
+    // encontrado 11/08/2026).
+    if (emulatorPidRef.current !== null) {
+      invoke("kill_emulator", { pid: emulatorPidRef.current }).catch(() => {});
+      emulatorPidRef.current = null;
+    }
     disconnect();
     onClose();
   }

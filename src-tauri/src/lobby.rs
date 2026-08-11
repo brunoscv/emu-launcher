@@ -29,6 +29,11 @@ pub struct Room {
     pub max_players: i64,
     pub players: Vec<Player>,
     pub started: bool,
+    /// PID do RetroArch host disparado quando a sala completou — usado só
+    /// pra matar o processo se a sala esvaziar (todo mundo saiu) sem
+    /// ninguém ter fechado o RetroArch manualmente. `None` até a partida
+    /// começar de verdade (ver `start_match`).
+    pub host_pid: Option<u32>,
 }
 
 /// Estado do lobby inteiro — em memória, de propósito: salas são efêmeras,
@@ -140,7 +145,7 @@ fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String>
 /// uma partida por vez. Rodar duas salas completando ao mesmo tempo não é
 /// suportado ainda; não é o cenário de uso atual (Bruno + amigos numa
 /// partida por vez), mas fica registrado pra quando/se importar.
-async fn launch_host(game: &RomEntry, max_players: i64) -> Result<u16, String> {
+async fn launch_host(game: &RomEntry, max_players: i64) -> Result<(u16, Option<u32>), String> {
     retroarch::ensure_retroarch_installed().await?;
 
     let system_def = systems::list_systems()?
@@ -157,11 +162,11 @@ async fn launch_host(game: &RomEntry, max_players: i64) -> Result<u16, String> {
     args.push("--appendconfig".to_string());
     args.push(cfg_path.to_string_lossy().to_string());
 
-    launcher::spawn_emulator(&system_def.emulator_path, &game.path, &args, |exit_code| {
+    let result = launcher::spawn_emulator(&system_def.emulator_path, &game.path, &args, |exit_code| {
         println!("RetroArch host encerrou (exit code {exit_code:?})");
     })?;
 
-    Ok(NETPLAY_PORT)
+    Ok((NETPLAY_PORT, result.pid))
 }
 
 /// Só decide se deve iniciar (sala cheia + todo mundo pronto, e só uma vez
@@ -198,14 +203,17 @@ pub async fn start_match(rooms: Rooms, code: String, game: RomEntry, max_players
     };
 
     match result {
-        Ok(host_port) => broadcast_message(
-            room,
-            &ServerMessage::MatchStarting {
-                host_port,
-                system: game.system,
-                game_name: game.name,
-            },
-        ),
+        Ok((host_port, host_pid)) => {
+            room.host_pid = host_pid;
+            broadcast_message(
+                room,
+                &ServerMessage::MatchStarting {
+                    host_port,
+                    system: game.system,
+                    game_name: game.name,
+                },
+            )
+        }
         Err(e) => {
             room.started = false; // permite tentar de novo (ex: desmarca e marca pronto de novo)
             broadcast_message(room, &ServerMessage::Error { message: e });
@@ -258,6 +266,7 @@ pub fn create_room(
             tx,
         }],
         started: false,
+        host_pid: None,
     };
 
     broadcast(&room);
@@ -320,7 +329,12 @@ pub fn set_ready(
 }
 
 /// Chamado quando a conexão cai. Sala vazia é descartada; sala com gente
-/// ainda dentro recebe o `RoomState` atualizado.
+/// ainda dentro recebe o `RoomState` atualizado. Se a sala esvaziou DEPOIS
+/// de já ter disparado o host (`host_pid` presente), mata o processo junto
+/// — senão fica um RetroArch host órfão rodando na porta 55435 pra sempre,
+/// travando a próxima partida (bug real encontrado 11/08/2026: processos
+/// acumulados de rodadas de teste anteriores confundindo o diagnóstico de
+/// um problema totalmente diferente).
 pub fn remove_player(rooms: &Rooms, code: &str, player_id: &str) {
     let Ok(mut rooms_guard) = rooms.lock() else {
         return;
@@ -332,6 +346,11 @@ pub fn remove_player(rooms: &Rooms, code: &str, player_id: &str) {
     room.players.retain(|p| p.id != player_id);
 
     if room.players.is_empty() {
+        if let Some(pid) = room.host_pid {
+            if let Err(e) = crate::launcher::kill_pid(pid) {
+                eprintln!("não consegui matar o host órfão (pid {pid}): {e}");
+            }
+        }
         rooms_guard.remove(code);
     } else {
         broadcast(room);

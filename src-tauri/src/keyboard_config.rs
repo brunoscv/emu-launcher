@@ -24,10 +24,17 @@ fn config_path() -> Result<std::path::PathBuf, String> {
 /// `lobby.rs::write_headless_config` já usa pro host headless. Chamado na
 /// hora de lançar (tanto "Jogar" quanto Host/Cliente), não fica escrito
 /// permanentemente — sobrescreve a cada partida com o mapeamento atual.
+///
+/// `config_save_on_exit = "false"` é essencial (bug real encontrado
+/// 11/08/2026, mesma causa do bug do host headless corrigido de manhã em
+/// `lobby.rs::write_headless_config`): sem isso, o RetroArch salva o
+/// config efetivo de volta no `retroarch.cfg` COMPARTILHADO ao fechar,
+/// baking permanentemente o mapeamento temporário de um jogador por cima
+/// do padrão de fábrica de todo mundo.
 #[tauri::command]
 pub fn write_keyboard_config(players: Vec<PlayerKeyboardConfig>) -> Result<String, String> {
     let path = config_path()?;
-    let mut contents = String::new();
+    let mut contents = String::from("config_save_on_exit = \"false\"\n");
 
     for player in &players {
         for (suffix, key) in &player.mapping {
