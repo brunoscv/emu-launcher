@@ -109,9 +109,17 @@ fn headless_config_path() -> Result<std::path::PathBuf, String> {
 /// na prática na Fase 3/#005). Multitap do SNES (`input_libretro_device_p2 =
 /// "257"`, device id confirmado na documentação) só entra quando o jogo
 /// pede mais de 2 jogadores — não faz sentido pra partida 1x1.
+/// `config_save_on_exit = "false"` é essencial aqui: sem isso, o RetroArch
+/// (comportamento padrão) salva o config efetivo de volta no retroarch.cfg
+/// COMPARTILHADO ao fechar — vazando esses drivers "null" pro cliente
+/// também (bug real encontrado: primeira partida da máquina rodou o host
+/// headless antes de qualquer cliente, e a config "sem vídeo" virou o
+/// padrão pra tudo depois).
 fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String> {
     let path = headless_config_path()?;
-    let mut contents = String::from("video_driver = \"null\"\naudio_driver = \"null\"\n");
+    let mut contents = String::from(
+        "video_driver = \"null\"\naudio_driver = \"null\"\nconfig_save_on_exit = \"false\"\n",
+    );
     if max_players > 2 {
         contents.push_str("input_libretro_device_p2 = \"257\"\n");
     }

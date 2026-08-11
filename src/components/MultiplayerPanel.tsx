@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useLobbyClient } from "../lobby/useLobbyClient";
 import type { RomEntry, SystemDefinition } from "../types/rom";
 import type { ServerMessage } from "../types/lobby";
 import { systemLabel } from "./systemMeta";
+import { AlphabetTabs, letterGroupOf } from "./AlphabetTabs";
+import { Pagination } from "./Pagination";
+
+const PAGE_SIZE = 50;
 
 /**
  * Tela "🎮 Multiplayer" — cliente do servidor de lobby (Fase 5, ver
@@ -19,6 +24,9 @@ export function MultiplayerPanel() {
   const [joinCode, setJoinCode] = useState("");
 
   const [gamesList, setGamesList] = useState<RomEntry[] | null>(null);
+  const [gameSearch, setGameSearch] = useState("");
+  const [gameLetter, setGameLetter] = useState<string | null>(null);
+  const [gamePage, setGamePage] = useState(1);
   const [roomState, setRoomState] = useState<
     Extract<ServerMessage, { type: "room_state" }> | null
   >(null);
@@ -42,6 +50,22 @@ export function MultiplayerPanel() {
   useEffect(() => {
     if (connected) send({ type: "list_games" });
   }, [connected, send]);
+
+  // Se o RetroArch fechar (jogador saiu da partida, crash, etc.), desmarca
+  // o "pronto" sozinho — senão a sala fica achando que esse jogador ainda
+  // está pronto pra jogar sem emulador nenhum aberto.
+  const roomStateRef = useRef(roomState);
+  roomStateRef.current = roomState;
+
+  useEffect(() => {
+    const unlistenPromise = listen("emulator-closed", () => {
+      startedRef.current = false;
+      if (roomStateRef.current) send({ type: "set_ready", ready: false });
+    });
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, [send]);
 
   async function handleMatchStarting(hostPort: number, system: string, gameName: string) {
     setLaunchError(null);
@@ -95,6 +119,45 @@ export function MultiplayerPanel() {
   }
 
   const me = roomState?.players.find((p) => p.id === myPlayerId);
+
+  const gameLetterCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const rom of gamesList ?? []) {
+      const letter = letterGroupOf(rom.name);
+      counts[letter] = (counts[letter] ?? 0) + 1;
+    }
+    return counts;
+  }, [gamesList]);
+
+  const availableGameLetters = useMemo(
+    () => Object.keys(gameLetterCounts).sort(),
+    [gameLetterCounts]
+  );
+
+  const trimmedGameSearch = gameSearch.trim().toLowerCase();
+
+  const scopedGames = useMemo(() => {
+    const games = gamesList ?? [];
+    if (trimmedGameSearch) {
+      return games.filter((r) => r.name.toLowerCase().includes(trimmedGameSearch));
+    }
+    if (gameLetter) {
+      return games.filter((r) => letterGroupOf(r.name) === gameLetter);
+    }
+    return games;
+  }, [gamesList, trimmedGameSearch, gameLetter]);
+
+  const gamePageCount = Math.max(1, Math.ceil(scopedGames.length / PAGE_SIZE));
+  const currentGamePage = Math.min(gamePage, gamePageCount);
+
+  const pagedGames = useMemo(
+    () => scopedGames.slice((currentGamePage - 1) * PAGE_SIZE, currentGamePage * PAGE_SIZE),
+    [scopedGames, currentGamePage]
+  );
+
+  useEffect(() => {
+    setGamePage(1);
+  }, [gameLetter, trimmedGameSearch]);
 
   return (
     <div className="multiplayer-panel">
@@ -178,18 +241,42 @@ export function MultiplayerPanel() {
             ) : gamesList.length === 0 ? (
               <p className="multiplayer-panel__status">O servidor ainda não tem nenhum jogo indexado.</p>
             ) : (
-              <ul className="multiplayer-panel__games">
-                {gamesList.map((rom) => (
-                  <li key={rom.path}>
-                    <span>
-                      {rom.name} · {systemLabel(rom.system)}
-                    </span>
-                    <button className="btn-scan" onClick={() => handleCreateRoom(rom)}>
-                      Criar sala
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <input
+                  className="multiplayer-panel__input"
+                  placeholder="Buscar pelo nome do jogo..."
+                  value={gameSearch}
+                  onChange={(e) => setGameSearch(e.target.value)}
+                />
+
+                {!trimmedGameSearch && (
+                  <AlphabetTabs
+                    letters={availableGameLetters}
+                    counts={gameLetterCounts}
+                    active={gameLetter}
+                    onSelect={(l) => setGameLetter(l === gameLetter ? null : l)}
+                  />
+                )}
+
+                {scopedGames.length === 0 ? (
+                  <p className="multiplayer-panel__status">Nenhum jogo encontrado.</p>
+                ) : (
+                  <ul className="multiplayer-panel__games">
+                    {pagedGames.map((rom) => (
+                      <li key={rom.path}>
+                        <span>
+                          {rom.name} · {systemLabel(rom.system)}
+                        </span>
+                        <button className="btn-scan" onClick={() => handleCreateRoom(rom)}>
+                          Criar sala
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <Pagination page={currentGamePage} pageCount={gamePageCount} onPageChange={setGamePage} />
+              </>
             )}
           </section>
         </div>
