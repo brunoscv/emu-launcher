@@ -7,12 +7,21 @@ import { LOBBY_PORT } from "../types/lobby";
  * do browser, não precisa passar isso pelo lado Rust. Só a ação final
  * (disparar o RetroArch local em modo cliente quando a partida começa)
  * passa por `invoke`, feito por quem usa esse hook (MultiplayerPanel).
+ *
+ * `onMessage` é chamado direto dentro do `onmessage` do WebSocket, não
+ * guardado num state de "última mensagem" — o servidor sempre manda
+ * `joined` seguido de `room_state` na entrada da sala, e em conexão local
+ * (127.0.0.1, latência ~0) as duas chegam próximas o suficiente pro React
+ * agrupar os dois `setState` numa única renderização, perdendo a mensagem
+ * `joined` (só a mais recente sobrevive). Processar cada mensagem na hora
+ * evita esse tipo de perda.
  */
-export function useLobbyClient() {
+export function useLobbyClient(onMessage: (msg: ServerMessage) => void) {
   const wsRef = useRef<WebSocket | null>(null);
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastMessage, setLastMessage] = useState<ServerMessage | null>(null);
 
   const connect = useCallback((host: string) => {
     setError(null);
@@ -28,8 +37,8 @@ export function useLobbyClient() {
       } catch {
         return; // mensagem que não é JSON válido — ignora
       }
-      setLastMessage(msg);
       if (msg.type === "error") setError(msg.message);
+      onMessageRef.current(msg);
     };
 
     wsRef.current?.close();
@@ -48,5 +57,5 @@ export function useLobbyClient() {
 
   useEffect(() => () => wsRef.current?.close(), []);
 
-  return { connected, error, lastMessage, connect, send, disconnect };
+  return { connected, error, connect, send, disconnect };
 }

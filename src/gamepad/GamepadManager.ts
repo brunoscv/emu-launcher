@@ -52,7 +52,6 @@ type StateListener = (states: GamepadState[]) => void;
 export class GamepadManager {
   private rafId: number | null = null;
   private listeners = new Set<StateListener>();
-  private lastStates: GamepadState[] = [];
 
   start(): void {
     if (this.rafId !== null) return; // já rodando
@@ -90,7 +89,6 @@ export class GamepadManager {
       states.push(translateGamepad(pad, profile));
     }
 
-    this.lastStates = states;
     this.listeners.forEach((fn) => fn(states));
   }
 }

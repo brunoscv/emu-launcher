@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLobbyClient } from "../lobby/useLobbyClient";
 import type { RomEntry, SystemDefinition } from "../types/rom";
+import type { ServerMessage } from "../types/lobby";
 import { systemLabel } from "./systemMeta";
 
 /**
@@ -13,36 +14,34 @@ import { systemLabel } from "./systemMeta";
  * cliente (--connect) automaticamente.
  */
 export function MultiplayerPanel() {
-  const { connected, error, lastMessage, connect, send, disconnect } = useLobbyClient();
-
   const [serverHost, setServerHost] = useState("");
   const [nickname, setNickname] = useState("Jogador");
   const [joinCode, setJoinCode] = useState("");
 
   const [gamesList, setGamesList] = useState<RomEntry[] | null>(null);
   const [roomState, setRoomState] = useState<
-    Extract<import("../types/lobby").ServerMessage, { type: "room_state" }> | null
+    Extract<ServerMessage, { type: "room_state" }> | null
   >(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
+  function handleLobbyMessage(msg: ServerMessage) {
+    if (msg.type === "games_list") setGamesList(msg.games);
+    if (msg.type === "room_state") setRoomState(msg);
+    if (msg.type === "joined") setMyPlayerId(msg.player_id);
+    if (msg.type === "match_starting" && !startedRef.current) {
+      startedRef.current = true;
+      handleMatchStarting(msg.host_port, msg.system, msg.game_name);
+    }
+  }
+
+  const { connected, error, connect, send, disconnect } = useLobbyClient(handleLobbyMessage);
+
   useEffect(() => {
     if (connected) send({ type: "list_games" });
   }, [connected, send]);
-
-  useEffect(() => {
-    if (!lastMessage) return;
-    if (lastMessage.type === "games_list") setGamesList(lastMessage.games);
-    if (lastMessage.type === "room_state") setRoomState(lastMessage);
-    if (lastMessage.type === "joined") setMyPlayerId(lastMessage.player_id);
-    if (lastMessage.type === "match_starting" && !startedRef.current) {
-      startedRef.current = true;
-      handleMatchStarting(lastMessage.host_port, lastMessage.system, lastMessage.game_name);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage]);
 
   async function handleMatchStarting(hostPort: number, system: string, gameName: string) {
     setLaunchError(null);
