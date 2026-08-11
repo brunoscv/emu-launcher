@@ -3,6 +3,8 @@ use crate::protocol::{ClientMessage, ServerMessage};
 use futures_util::{SinkExt, StreamExt};
 use rand::Rng;
 use std::net::SocketAddr;
+use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::accept_async;
@@ -14,22 +16,93 @@ use tokio_tungstenite::tungstenite::Message;
 /// atribuição de porta); o RetroArch em si continua indo pela porta dele.
 const PORT: u16 = 7777;
 
-/// Modo servidor (IDEAS.md #007). Fase 5a validou só o transporte; a partir
-/// da 5b já fala o protocolo de sala de verdade (`protocol.rs`/`lobby.rs`) —
-/// ainda sem disparar RetroArch, isso fica pra um corte seguinte.
+/// Modo servidor dedicado (IDEAS.md #007), `--server`, sem Tauri — cria o
+/// próprio runtime async em `main.rs` porque não tem nenhum rodando ainda.
 pub async fn run() {
-    let addr = format!("0.0.0.0:{PORT}");
-    let listener = TcpListener::bind(&addr)
-        .await
-        .unwrap_or_else(|e| panic!("não consegui abrir a porta {PORT} do servidor de lobby: {e}"));
-
-    println!("Servidor de lobby escutando em {addr}");
-
+    let listener = bind_listener().await;
     let rooms: Rooms = lobby::new_rooms();
+    println!("Servidor de lobby escutando em 0.0.0.0:{PORT}");
+    accept_loop(listener, rooms).await;
+}
 
+async fn bind_listener() -> TcpListener {
+    let addr = format!("0.0.0.0:{PORT}");
+    TcpListener::bind(&addr)
+        .await
+        .unwrap_or_else(|e| panic!("não consegui abrir a porta {PORT} do servidor de lobby: {e}"))
+}
+
+/// Loop de aceitar conexões em si — reusado tanto pelo modo `--server`
+/// dedicado quanto pelo modo embutido (IDEAS.md #008, ver `ensure_embedded_running`).
+async fn accept_loop(listener: TcpListener, rooms: Rooms) {
     while let Ok((stream, peer_addr)) = listener.accept().await {
         tokio::spawn(handle_connection(stream, peer_addr, rooms.clone()));
     }
+}
+
+/// Só existe quando o "Host" cai no fallback local (servidor dedicado
+/// offline/não configurado) — nesse caso a própria instância desktop vira
+/// lobby + host, sem precisar de um segundo processo. `OnceLock` porque só
+/// deve subir uma vez por execução do app; cliques repetidos em "Host"
+/// reusam a mesma instância.
+static EMBEDDED_ROOMS: OnceLock<Rooms> = OnceLock::new();
+
+/// Sobe o lobby embutido se ainda não estiver rodando (idempotente) e
+/// devolve o `Rooms` compartilhado, pra quem chamou poder criar a sala
+/// direto em seguida. Roda dentro do runtime async que o Tauri já mantém —
+/// diferente do `run()` acima, não precisa (e não pode) criar outro runtime.
+pub async fn ensure_embedded_running() -> Result<Rooms, String> {
+    if let Some(rooms) = EMBEDDED_ROOMS.get() {
+        return Ok(rooms.clone());
+    }
+
+    let listener = TcpListener::bind(format!("0.0.0.0:{PORT}"))
+        .await
+        .map_err(|e| format!("não consegui abrir a porta {PORT} pro lobby local: {e}"))?;
+
+    let rooms: Rooms = lobby::new_rooms();
+    // Corrida entre dois cliques rápidos em "Host": só um dos dois vence o
+    // `set`, o outro descarta o listener que acabou de abrir e usa o rooms
+    // que já ganhou — evita dois listeners na mesma porta.
+    if EMBEDDED_ROOMS.set(rooms.clone()).is_err() {
+        drop(listener);
+        return Ok(EMBEDDED_ROOMS.get().expect("acabou de checar que existe").clone());
+    }
+
+    println!("Lobby embutido escutando em 0.0.0.0:{PORT} (servidor dedicado offline/não configurado)");
+    tokio::spawn(accept_loop(listener, rooms.clone()));
+    Ok(rooms)
+}
+
+/// Tenta um handshake WebSocket rápido no servidor dedicado configurado —
+/// só pra saber se está de pé, não manda nenhuma mensagem de verdade.
+/// Timeout curto de propósito: essa checagem acontece toda vez que alguém
+/// clica "Host", não pode travar a UI esperando uma máquina desligada.
+#[tauri::command]
+pub async fn check_server_online(host: String) -> bool {
+    let url = format!("ws://{host}:{PORT}");
+    tokio::time::timeout(Duration::from_secs(2), tokio_tungstenite::connect_async(&url))
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false)
+}
+
+/// Resolve qual endereço o "Host"/"Cliente" deve usar pra falar com o lobby
+/// (IDEAS.md #008): servidor dedicado configurado e online, se existir e
+/// responder; senão sobe (ou reusa) o lobby embutido nessa própria máquina
+/// e devolve "127.0.0.1". O front-end usa o resultado pra abrir o
+/// WebSocket normal (`useLobbyClient`) — o protocolo é o mesmo dos dois
+/// jeitos, só muda pra quem conecta.
+#[tauri::command]
+pub async fn resolve_lobby_host() -> Result<String, String> {
+    if let Some(configured) = crate::settings::get_dedicated_server_host()? {
+        if check_server_online(configured.clone()).await {
+            return Ok(configured);
+        }
+    }
+
+    ensure_embedded_running().await?;
+    Ok("127.0.0.1".to_string())
 }
 
 fn generate_player_id() -> String {
@@ -69,8 +142,8 @@ async fn handle_connection(stream: TcpStream, peer_addr: SocketAddr, rooms: Room
                     Ok(ClientMessage::ListGames) => {
                         Some(lobby::list_games().unwrap_or_else(|e| ServerMessage::Error { message: e }))
                     }
-                    Ok(ClientMessage::CreateRoom { rom_path, nickname }) => {
-                        match lobby::create_room(&rooms, rom_path, nickname, player_id.clone(), tx.clone()) {
+                    Ok(ClientMessage::CreateRoom { game_name, game_system, nickname }) => {
+                        match lobby::create_room(&rooms, game_name, game_system, nickname, player_id.clone(), tx.clone()) {
                             // o RoomState em si já foi anunciado via broadcast (chega pelo rx
                             // logo em seguida) — isso aqui só avisa quem é "eu" nele.
                             Ok(code) => {
@@ -158,14 +231,14 @@ mod tests {
             eprintln!("nenhum jogo indexado na biblioteca local — pulando teste");
             return;
         };
-        let rom_path = game.path.clone();
 
         let mut host_ws = connect().await;
         host_ws
             .send(Message::text(
                 serde_json::to_string(&serde_json::json!({
                     "type": "create_room",
-                    "rom_path": rom_path,
+                    "game_name": game.name,
+                    "game_system": game.system,
                     "nickname": "Bruno",
                 }))
                 .unwrap(),
@@ -260,14 +333,14 @@ mod tests {
             eprintln!("nenhum jogo indexado na biblioteca local — pulando teste");
             return;
         };
-        let rom_path = game.path.clone();
 
         let mut host_ws = connect().await;
         host_ws
             .send(Message::text(
                 serde_json::to_string(&serde_json::json!({
                     "type": "create_room",
-                    "rom_path": rom_path,
+                    "game_name": game.name,
+                    "game_system": game.system,
                     "nickname": "Bruno",
                 }))
                 .unwrap(),

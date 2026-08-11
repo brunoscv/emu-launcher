@@ -500,6 +500,185 @@ Plano de integração:
 
 ---
 
+## 🚧 #008 — Host/Cliente por jogo, sem servidor dedicado sempre no ar
+
+**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026 · **Em andamento:** 11/08/2026
+(implementado, lado "Host"/fallback embutido validado ao vivo — log real: `Lobby embutido
+escutando em 0.0.0.0:7777 (servidor dedicado offline/não configurado)` +
+`Cliente conectado: 127.0.0.1:...`. Falta validar o lado "Cliente" numa segunda máquina de
+verdade antes de marcar como ✅.)
+
+**A ideia:** trocar o fluxo atual (tela separada "🎮 Multiplayer", conectar num IP de
+servidor que já precisa estar rodando `--server` em outra máquina, escolher o jogo da
+biblioteca DELE) por três botões direto em cada linha da `GameList`: **Jogar** (abre local,
+sem multiplayer, comportamento de hoje), **Host** (vai direto pra uma tela de lobby com
+esse jogo já escolhido e um código de sala pronto pra compartilhar) e **Cliente** (vai pra
+uma tela de lobby só com campo de código). Quem clica Host e quem clica Cliente marcam
+"pronto" e a partida começa — sem escolher jogo em tela nenhuma, o jogo já veio da linha
+que foi clicada.
+
+**Mudança de arquitetura que isso implica:** hoje o "servidor" é o modo `--server`, um
+processo à parte, sem GUI, pensado pra rodar continuamente numa máquina dedicada (ver #001
+e #007) — a lista de jogos do lobby vem SEMPRE da biblioteca desse servidor. Nessa ideia
+nova, quem clica "Host" faz isso a partir do **próprio app desktop normal** (não precisa
+subir um segundo processo/`--server` em paralelo) — o clique dispara, dentro do mesmo
+processo Tauri, tanto um lobby "de bolso" (só pra essa sala) quanto o RetroArch host
+headless, na mesma máquina de quem clicou. Ninguém mais precisa deixar uma máquina dedicada
+ligada 24/7 só pra testar com um amigo.
+
+**Por que faz sentido:** o fluxo atual tem fricção — precisa de uma máquina rodando
+`--server` à parte (o que motivou o teste esquisito de rodar duas instâncias na mesma
+máquina, servidor e cliente, competindo por CPU, ver histórico de troubleshooting desse
+dia). O fluxo host/cliente por jogo elimina esse passo: qualquer um dos dois amigos pode
+"ser o servidor" da partida na hora, sem setup prévio.
+
+**Decisão (11/08/2026, com o Bruno):** modelo híbrido com fallback automático. Ao clicar
+"Host": 1) o app tenta uma conexão rápida (com timeout) no endereço do servidor dedicado
+configurado; 2) se responder, delega pra ele — o servidor dedicado cria o lobby e vira o
+host de verdade (fluxo de hoje, #007, sem mudança nenhuma nesse caminho); 3) se não
+responder (offline), a MESMA instância desktop de quem clicou "Host" passa a fazer os dois
+papéis — lobby (WebSocket, mesma lógica de `server.rs`/`lobby.rs`) **e** RetroArch host
+headless — tudo dentro do processo do app já aberto, sem precisar subir uma segunda
+instância/processo. O jogador local ainda joga normalmente na própria janela.
+
+### Plano técnico inicial
+
+1. **`server.rs` deixa de assumir que só roda via `--server`.** Hoje `run()` cria seu
+   próprio `tokio::runtime::Runtime` do zero porque o modo `--server` não tem Tauri (logo
+   não tem runtime async nenhum rodando ainda). Extrair a lógica de aceitar conexões
+   (`TcpListener::bind` + loop + `Rooms` compartilhado) numa função que recebe/retorna algo
+   chamável tanto: a) do jeito que já é hoje (`--server`, cria o runtime do zero, roda pra
+   sempre) quanto b) de dentro do runtime async que o Tauri **já** mantém rodando (spawnado
+   sob demanda, só quando o usuário clica "Host" e o fallback local é acionado — não como
+   um listener permanente do app desktop).
+2. **Novo command Tauri `check_server_online(host)`** — tenta abrir e fechar uma conexão
+   WebSocket rápida (com timeout curto, tipo 1-2s) no servidor configurado. Decide qual dos
+   dois caminhos do item acima seguir.
+3. **Novo lugar pra guardar "meu servidor"** — hoje o IP do servidor é digitado toda vez
+   (`serverHost` só existe em memória no `MultiplayerPanel`). Precisa virar uma config
+   persistida (nova linha de settings, provavelmente junto de `system_configs` ou uma tabela
+   nova simples `app_settings(key, value)`), editável numa tela de configurações — o botão
+   "Host" não deve pedir IP toda vez.
+4. **`create_room` por nome, não por path exato.** Hoje `lobby::create_room` busca a rom
+   pelo `rom_path` batendo **exato** com a biblioteca do servidor — funciona hoje porque a
+   lista de jogos que a UI mostra pra criar sala já VEM do servidor (mesmo path). No fluxo
+   novo, quem clica "Host" está escolhendo um jogo da **própria** biblioteca local, com um
+   `rom_path` que quase certamente não bate com o caminho da mesma rom no servidor dedicado
+   (pastas diferentes por máquina — mesma ressalva que já existe hoje pro lado do cliente,
+   ver corte 5d do #007). Servidor precisa resolver por **nome + sistema**, igual o cliente
+   já faz hoje pra achar a rom local quando a partida começa.
+5. **`GameList.tsx`** ganha os botões "Host"/"Cliente" ao lado de "▶ Jogar" (só aparecem se
+   o jogo suportar mais de 1 jogador — ver #010). Clicar em qualquer um dos dois navega
+   direto pra uma tela de Lobby nova (extraída do que já existe em `MultiplayerPanel.tsx`),
+   já com o jogo resolvido — sem passar pela etapa de "conectar, listar jogos, escolher".
+   "Cliente" ainda precisa de um campo de código (e, se "meu servidor" não estiver
+   configurado/local, também do IP de quem está hospedando).
+6. **Tela "🎮 Multiplayer" genérica (atual) é substituída** por esse fluxo — os botões por
+   jogo passam a ser a única porta de entrada.
+
+**Depende de/afeta:** #001 (modo standalone vs. servidor), #007 (servidor de lobby) — muda
+o `server.rs`/`lobby.rs`/`MultiplayerPanel.tsx` dos três.
+
+---
+
+## 🔧 #009 — Configuração de controles (teclado/gamepad) pela nossa UI, não pelo menu do RetroArch
+
+**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026
+
+**A ideia:** o menu de configuração de input do próprio RetroArch é considerado confuso/
+difícil. Em vez de mandar o jogador configurar lá dentro, ter uma tela nossa (apertar cada
+botão, um de cada vez — mesmo conceito do módulo `src/gamepad/GamepadCalibration.tsx`, que
+já existe pronto pra gamepad mas nunca foi plugado no `App.tsx`) e escrever o resultado num
+arquivo que o RetroArch aplica sozinho ao abrir.
+
+**Por que faz sentido:** RetroArch já lê configuração de input de arquivo texto
+(`retroarch.cfg` ou `--appendconfig`, chave=valor tipo `input_player1_a = "x"`) — nós já
+usamos exatamente esse mecanismo hoje em `lobby.rs` (`write_headless_config`, pros drivers
+null do host) e mexemos nele manualmente durante os testes de hoje (remapeando teclado do
+Player 2 direto no `.cfg`). Automatizar isso pela nossa UI é extensão natural de um
+mecanismo que já existe e já foi validado na prática, só que hoje é feito à mão.
+
+**Escopo inicial (conforme pedido):** teclado primeiro, não gamepad — o módulo de gamepad
+já resolve calibração de controle fisico; falta o equivalente pra teclado, que hoje não
+tem tela nenhuma (foi tudo feito hoje editando o `.cfg` direto por mim).
+
+### Plano técnico inicial
+
+1. **Tela nova "Configurar teclado"** — mesma mecânica do `GamepadCalibration.tsx` que já
+   existe (pede pra apertar cada botão do RetroPad um de cada vez, agora capturando
+   `KeyboardEvent` em vez de `Gamepad.buttons`), por jogador (P1/P2), persistido localmente
+   (mesmo padrão do `src/gamepad/storage.ts`, adaptado — ali é por `gamepad.id`, aqui pode
+   ser só "layout de teclado do player 1"/"do player 2", sem precisar de id de dispositivo).
+2. **Tabela de tradução `KeyboardEvent.code` → nome de tecla do RetroArch** — RetroArch usa
+   nomes próprios (`"left"`, `"s"`, `"enter"`, `"f1"`...), diferente do `code` do browser
+   (`"ArrowLeft"`, `"KeyS"`). Precisa de um mapa de tradução (~100 entradas, mas mecânico —
+   já vimos hoje na prática quais chaves o RetroArch espera, editando o `.cfg` à mão).
+3. **Geração do arquivo de config** — no momento de disparar `launch_emulator`, gerar um
+   `--appendconfig` com `input_player{N}_{botão} = "{tecla}"` pra cada player configurado
+   (mesmo mecanismo que `lobby.rs::write_headless_config` já usa pro host headless — só
+   que aqui é por jogador/local, não fixo pro modo headless).
+4. **Cuidado a registrar (aprendido na prática hoje):** existem hotkeys globais do
+   RetroArch (`input_hold_fast_forward`, `input_menu_toggle`, etc.) que **não são
+   por-player** — se uma tecla escolhida pra um botão de jogador colidir com uma hotkey
+   global, os dois disparam juntos (foi exatamente o bug do "avanço aleatório" do Player 2
+   que corrigimos hoje). A tela de configuração deveria **avisar/bloquear** teclas que já
+   são hotkey do sistema, não deixar o usuário escolher às cegas.
+
+**Depende de:** nada bloqueante — pode ser feito independente do #008.
+
+---
+
+## 🔧 #010 — Número de jogadores como metadado puro + validação no lobby
+
+**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026
+
+**A ideia:** o seletor "👥 2/3/4" que hoje aparece editável em cada linha da `GameList`
+(#004, já implementado) deveria virar só um **badge informativo** (ícone + número máximo),
+alimentado automaticamente pela consulta à API (IGDB, já integrada) — não uma caixa de
+seleção manual em destaque. No lobby, se alguém tentar entrar numa sala além do máximo de
+jogadores daquele jogo (incluindo jogos de 1 jogador só, que não deveriam nem oferecer
+"Host" multiplayer), o servidor recusa com uma mensagem clara explicando o limite daquele
+jogo específico — e quando um jogador sai e libera vaga, a sala volta a aceitar entrada.
+
+**O que já existe (#004) e não muda:** a tabela `game_player_overrides` (override manual)
+e `game_player_auto` (cache do IGDB) já existem, e `join_room` já rejeita entrada além do
+`max_players` calculado (mensagem genérica "sala já está cheia"). O que essa ideia pede de
+novo é (a) mudar a APRESENTAÇÃO na `GameList` de seletor editável pra badge somente-leitura
+baseado no dado automático, e (b) mensagens de erro mais específicas/claras no lobby sobre
+POR QUE não deu pra entrar (limite do jogo, não só "sala cheia").
+
+**Decisões (11/08/2026, com o Bruno):** override manual sai de vez da UI (sem ajuste
+secundário escondido) — 100% automático via IGDB. Busca do IGDB continua botão separado
+(`enrich_player_counts`, como já é hoje), não entra no `reindex_library`, por causa do
+rate limit da API.
+
+### Plano técnico inicial
+
+1. **`GameList.tsx`** — troca o `<select>` "👥 2/3/4" por um badge somente-leitura
+   (ícone + número), lido direto de `get_player_counts` (já existe). Sem `onChange`, sem
+   `onSetPlayerCount` — remove essa prop da árvore de componentes.
+2. **Remove `save_player_override` do frontend** (command Rust pode continuar existindo por
+   enquanto, só sem chamador — decidir na hora se vale apagar de vez ou deixar morto por
+   segurança de rollback).
+3. **`get_player_counts`/`get_player_counts()` em `player_overrides.rs`** deixa de
+   considerar a tabela `game_player_overrides` na precedência — vira só
+   `COALESCE(automático, 2)`, não mais `COALESCE(override, automático, 2)`. Tabela
+   `game_player_overrides` fica sem uso (decidir na implementação: `DROP TABLE` numa
+   migração ou só abandonar).
+4. **`lobby.rs::join_room`** — hoje já rejeita entrada além do `max_players` com "Sala já
+   está cheia". Trocar a mensagem de erro por algo específico tipo `"Esse jogo aceita no
+   máximo {max_players} jogador(es)"` quando a rejeição for por causa do limite do jogo
+   (distinguir de sala genuinamente cheia por outro motivo, se existir esse caso).
+5. **Jogo de 1 jogador não oferece "Host"** (`GameList.tsx`, ligado ao #008) — esconder os
+   botões Host/Cliente quando `max_players <= 1`.
+6. **"Quando um jogador sai, a sala libera vaga"** — já é o comportamento de
+   `lobby::remove_player` hoje (remove da lista, `broadcast` do novo estado) — nenhuma
+   mudança necessária aqui, só confirmar que continua valendo com a mensagem de erro nova.
+
+**Depende de:** #004 (implementado, é a base disso). Badge "sem Host" depende do #008.
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

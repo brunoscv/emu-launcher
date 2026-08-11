@@ -6,7 +6,16 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     ListGames,
-    CreateRoom { rom_path: String, nickname: String },
+    /// Resolvido por nome+sistema, não por path exato (IDEAS.md #008) — quem
+    /// manda essa mensagem pode estar numa máquina diferente da do servidor,
+    /// com o mesmo jogo numa pasta diferente (path não bate, nome+sistema
+    /// sim). Mesmo princípio que o cliente já usa pra achar a rom local
+    /// quando a partida começa (ver `MatchStarting`).
+    CreateRoom {
+        game_name: String,
+        game_system: String,
+        nickname: String,
+    },
     JoinRoom { code: String, nickname: String },
     SetReady { ready: bool },
 }

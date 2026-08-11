@@ -16,7 +16,7 @@ import { GameList } from "./components/GameList";
 import { SystemSelector } from "./components/SystemSelector";
 import { AlphabetTabs, letterGroupOf } from "./components/AlphabetTabs";
 import { Pagination } from "./components/Pagination";
-import { MultiplayerPanel } from "./components/MultiplayerPanel";
+import { LobbyScreen } from "./components/LobbyScreen";
 import "./styles/theme.css";
 
 const PAGE_SIZE = 50;
@@ -33,7 +33,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showMultiplayer, setShowMultiplayer] = useState(false);
+  const [lobby, setLobby] = useState<{ mode: "host" | "client"; game: RomEntry } | null>(null);
   const [installingRetroArch, setInstallingRetroArch] = useState(false);
   const [playerCounts, setPlayerCounts] = useState<Record<string, number>>({});
   const [enriching, setEnriching] = useState(false);
@@ -208,23 +208,8 @@ export default function App() {
       <header className="app-header">
         <h1 className="app-header__title">Emu Launcher</h1>
         <div className="app-header__scan">
-          <button
-            className="btn-scan"
-            onClick={() => {
-              setShowSettings((v) => !v);
-              setShowMultiplayer(false);
-            }}
-          >
+          <button className="btn-scan" onClick={() => setShowSettings((v) => !v)}>
             {showSettings ? "Fechar configurações" : "⚙ Consoles"}
-          </button>
-          <button
-            className="btn-scan"
-            onClick={() => {
-              setShowMultiplayer((v) => !v);
-              setShowSettings(false);
-            }}
-          >
-            {showMultiplayer ? "Fechar multiplayer" : "🎮 Multiplayer"}
           </button>
           <button className="btn-scan" onClick={handleReindex} disabled={reindexing}>
             {reindexing ? (
@@ -271,9 +256,9 @@ export default function App() {
             }}
           />
         </main>
-      ) : showMultiplayer ? (
+      ) : lobby ? (
         <main className="app-main">
-          <MultiplayerPanel />
+          <LobbyScreen mode={lobby.mode} game={lobby.game} onClose={() => setLobby(null)} />
         </main>
       ) : (
         <>
@@ -314,6 +299,8 @@ export default function App() {
               onPlay={handlePlay}
               onConfigureSystems={() => setShowSettings(true)}
               onSetPlayerCount={handleSetPlayerCount}
+              onHost={(rom) => setLobby({ mode: "host", game: rom })}
+              onClient={(rom) => setLobby({ mode: "client", game: rom })}
             />
           </main>
 

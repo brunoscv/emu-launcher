@@ -6,7 +6,7 @@ import { LOBBY_PORT } from "../types/lobby";
  * WebSocket cru — o webview do Tauri já suporta a API de WebSocket nativa
  * do browser, não precisa passar isso pelo lado Rust. Só a ação final
  * (disparar o RetroArch local em modo cliente quando a partida começa)
- * passa por `invoke`, feito por quem usa esse hook (MultiplayerPanel).
+ * passa por `invoke`, feito por quem usa esse hook (LobbyScreen).
  *
  * `onMessage` é chamado direto dentro do `onmessage` do WebSocket, não
  * guardado num state de "última mensagem" — o servidor sempre manda

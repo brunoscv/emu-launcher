@@ -13,6 +13,8 @@ interface Props {
   onPlay: (rom: RomEntry) => void;
   onConfigureSystems: () => void;
   onSetPlayerCount: (rom: RomEntry, maxPlayers: number) => void;
+  onHost: (rom: RomEntry) => void;
+  onClient: (rom: RomEntry) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -47,6 +49,8 @@ export function GameList({
   onPlay,
   onConfigureSystems,
   onSetPlayerCount,
+  onHost,
+  onClient,
 }: Props) {
   return (
     <div className="game-list-wrap">
@@ -115,13 +119,35 @@ export function GameList({
                 {isRunning ? (
                   <span className="game-row__running">Rodando...</span>
                 ) : (
-                  <button
-                    className="game-row__play"
-                    onClick={() => onPlay(rom)}
-                    disabled={runningPath !== null}
-                  >
-                    ▶ Jogar
-                  </button>
+                  <div className="game-row__actions">
+                    <button
+                      className="game-row__play"
+                      onClick={() => onPlay(rom)}
+                      disabled={runningPath !== null}
+                    >
+                      ▶ Jogar
+                    </button>
+                    {maxPlayers > 1 && (
+                      <>
+                        <button
+                          className="game-row__multiplayer"
+                          onClick={() => onHost(rom)}
+                          disabled={runningPath !== null}
+                          title="Hospedar uma partida multiplayer desse jogo"
+                        >
+                          Host
+                        </button>
+                        <button
+                          className="game-row__multiplayer"
+                          onClick={() => onClient(rom)}
+                          disabled={runningPath !== null}
+                          title="Entrar numa partida multiplayer desse jogo"
+                        >
+                          Cliente
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             );
@@ -224,6 +250,17 @@ export function GameList({
           color: var(--ink-muted);
         }
 
+        .game-row__actions {
+          display: flex;
+          gap: 0.4rem;
+          opacity: 0;
+        }
+
+        /* aparece no hover da linha inteira, não só dos botões */
+        .game-row:hover .game-row__actions {
+          opacity: 1;
+        }
+
         .game-row__play {
           flex: 0 0 auto;
           background: var(--accent-phosphor);
@@ -233,15 +270,20 @@ export function GameList({
           padding: 0.5rem 0.9rem;
           font-weight: 600;
           font-size: 0.85rem;
-          opacity: 0;
         }
 
-        /* aparece no hover da linha inteira, não só do botão */
-        .game-row:hover .game-row__play {
-          opacity: 1;
+        .game-row__multiplayer {
+          flex: 0 0 auto;
+          background: transparent;
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          padding: 0.5rem 0.75rem;
+          font-size: 0.85rem;
         }
 
-        .game-row__play:disabled {
+        .game-row__play:disabled,
+        .game-row__multiplayer:disabled {
           cursor: not-allowed;
         }
 

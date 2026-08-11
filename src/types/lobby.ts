@@ -8,7 +8,7 @@ export interface PlayerView {
 
 export type ClientMessage =
   | { type: "list_games" }
-  | { type: "create_room"; rom_path: string; nickname: string }
+  | { type: "create_room"; game_name: string; game_system: string; nickname: string }
   | { type: "join_room"; code: string; nickname: string }
   | { type: "set_ready"; ready: boolean };
 

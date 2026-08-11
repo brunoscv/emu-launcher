@@ -221,19 +221,24 @@ pub fn list_games() -> Result<ServerMessage, String> {
 
 /// A lista de jogos vem SEMPRE da biblioteca indexada do próprio servidor
 /// (não da de quem está pedindo) — é o servidor quem vai rodar o RetroArch
-/// host de verdade (Fase 3/#005), precisa ter o arquivo local.
+/// host de verdade (Fase 3/#005), precisa ter o arquivo local. Resolvido por
+/// nome+sistema (IDEAS.md #008), não por path exato — quem cria a sala pode
+/// estar numa máquina diferente da do servidor (o botão "Host" delega pro
+/// servidor dedicado quando ele está online), com a mesma rom numa pasta
+/// diferente lá.
 pub fn create_room(
     rooms: &Rooms,
-    rom_path: String,
+    game_name: String,
+    game_system: String,
     nickname: String,
     player_id: String,
     tx: UnboundedSender<Message>,
 ) -> Result<String, String> {
     let game = library::list_library()?
         .into_iter()
-        .find(|g| g.path == rom_path)
-        .ok_or_else(|| format!("Jogo não encontrado na biblioteca do servidor: {rom_path}"))?;
-    let max_players = max_players_for(&rom_path)?;
+        .find(|g| g.name == game_name && g.system == game_system)
+        .ok_or_else(|| format!("Jogo \"{game_name}\" não encontrado na biblioteca do servidor"))?;
+    let max_players = max_players_for(&game.path)?;
 
     let mut rooms_guard = rooms.lock().map_err(|_| lock_err())?;
     let code = generate_code(&rooms_guard);

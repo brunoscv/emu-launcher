@@ -55,6 +55,14 @@ pub fn connect() -> Result<Connection, String> {
             rom_path TEXT PRIMARY KEY,
             max_players INTEGER,
             checked_at TEXT NOT NULL
+        );
+
+        -- Configs simples de chave/valor (IDEAS.md #008) — hoje só guarda o
+        -- endereço do servidor dedicado (\"meu servidor\"), mas evita criar uma
+        -- tabela nova pra cada config futura de uma linha só.
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );",
     )
     .map_err(|e| e.to_string())?;

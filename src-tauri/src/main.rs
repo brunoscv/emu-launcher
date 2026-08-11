@@ -11,6 +11,7 @@ mod protocol;
 mod retroarch;
 mod scanner;
 mod server;
+mod settings;
 mod systems;
 
 use igdb::enrich_player_counts;
@@ -18,6 +19,8 @@ use launcher::launch_emulator;
 use library::{get_system_configs, list_library, reindex_library, save_system_configs};
 use player_overrides::{get_player_counts, save_player_override};
 use retroarch::ensure_retroarch_installed;
+use server::{check_server_online, resolve_lobby_host};
+use settings::{get_dedicated_server_host, save_dedicated_server_host};
 use systems::list_systems;
 
 fn main() {
@@ -52,7 +55,11 @@ fn main() {
             ensure_retroarch_installed,
             get_player_counts,
             save_player_override,
-            enrich_player_counts
+            enrich_player_counts,
+            check_server_online,
+            resolve_lobby_host,
+            get_dedicated_server_host,
+            save_dedicated_server_host
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri");

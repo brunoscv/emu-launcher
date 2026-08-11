@@ -31,6 +31,7 @@ function withDefaults(loaded: SystemConfig[]): SystemConfig[] {
  */
 export function SystemSelector({ onClose, onSaved }: Props) {
   const [configs, setConfigs] = useState<SystemConfig[]>(withDefaults([]));
+  const [dedicatedServer, setDedicatedServer] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export function SystemSelector({ onClose, onSaved }: Props) {
       .then((loaded) => setConfigs(withDefaults(loaded)))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
+    invoke<string | null>("get_dedicated_server_host").then((host) => setDedicatedServer(host ?? ""));
   }, []);
 
   function updateFolder(systemId: string, romFolder: string) {
@@ -57,6 +59,7 @@ export function SystemSelector({ onClose, onSaved }: Props) {
     setSaving(true);
     try {
       await invoke("save_system_configs", { configs });
+      await invoke("save_dedicated_server_host", { host: dedicatedServer });
       onSaved();
     } catch (e) {
       setError(String(e));
@@ -104,6 +107,24 @@ export function SystemSelector({ onClose, onSaved }: Props) {
                 />
               </div>
             ))}
+          </div>
+
+          <div className="system-selector__server">
+            <label className="system-selector__server-label" htmlFor="dedicated-server">
+              Servidor dedicado (opcional)
+            </label>
+            <input
+              id="dedicated-server"
+              className="system-selector__folder"
+              type="text"
+              placeholder="ex: 192.168.1.50 — deixe em branco pra não usar nenhum"
+              value={dedicatedServer}
+              onChange={(e) => setDedicatedServer(e.target.value)}
+            />
+            <p className="system-selector__hint">
+              Quando clicar em "Host", o app tenta esse endereço primeiro. Se não responder
+              (ou se ficar em branco), a própria máquina vira lobby + host da partida.
+            </p>
           </div>
         </>
       )}
@@ -203,6 +224,21 @@ export function SystemSelector({ onClose, onSaved }: Props) {
 
         .system-selector__actions {
           margin-top: 1.25rem;
+        }
+
+        .system-selector__server {
+          margin-top: 1.5rem;
+          padding-top: 1.25rem;
+          border-top: 1px solid var(--border-soft);
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+        }
+
+        .system-selector__server-label {
+          font-weight: 600;
+          font-size: 0.85rem;
+          color: var(--ink-primary);
         }
       `}</style>
     </div>
