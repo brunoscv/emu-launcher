@@ -627,12 +627,21 @@ tem tela nenhuma (foi tudo feito hoje editando o `.cfg` direto por mim).
    `lobby.rs::write_headless_config`. Chamado em `App.tsx::handlePlay` e
    `LobbyScreen.tsx::handleMatchStarting`, sempre; sem nenhum jogador configurado devolve
    `[]` e não muda nada do comportamento padrão do RetroArch.
-4. **Proteção contra colisão com hotkey global, aplicada de verdade:** `RESERVED_HOTKEYS`
-   bloqueia na hora de apertar a tecla (mensagem de aviso, não deixa avançar o passo) —
-   é exatamente o tipo de bug que causou o "avanço aleatório" do Player 2 durante os
-   testes de multiplayer de hoje (tecla "L" ao mesmo tempo botão A do jogador e hotkey
-   `input_hold_fast_forward`). Também bloqueia reusar a mesma tecla duas vezes dentro do
-   mesmo mapeamento.
+4. **Aviso de colisão com hotkey global, não bloqueio (revisado 11/08/2026, com o
+   Bruno):** primeira versão bloqueava de vez qualquer tecla em `RESERVED_HOTKEYS` — o
+   Bruno notou que isso tira opções razoáveis do usuário (ex: WASD colide com "L"=avançar
+   rápido e "K"=avançar 1 frame). Virou aviso com confirmação: `KeyboardCalibration.tsx`
+   mostra qual ação da hotkey seria afetada e dois botões, "Usar mesmo assim" (segue com a
+   tecla escolhida) ou "Escolher outra tecla" (volta a esperar outra tecla). Mesmo padrão
+   pra tecla repetida dentro do próprio mapeamento. Quem calibra decide e assume o risco —
+   foi exatamente esse tipo de colisão sem aviso nenhum que causou o "avanço aleatório" do
+   Player 2 durante os testes de multiplayer de hoje (tecla "L" era botão A do jogador E
+   hotkey `input_hold_fast_forward` ao mesmo tempo).
+5. **`HotkeysScreen.tsx` (novo, pedido do Bruno):** botão "🔑 Hotkeys" no header — tabela
+   somente-leitura com todas as hotkeys de `RESERVED_HOTKEYS` e a ação de cada uma,
+   cruzando com os mapeamentos salvos pra marcar quando uma hotkey foi sobrescrita por
+   algum botão de jogador (o cenário que motivou o pedido: "apertei a tecla de salvar
+   estado e não funcionou — porque desconfigurei ela sem saber").
 
 **Limitação conhecida:** `RESERVED_HOTKEYS` é uma lista fixa dos hotkeys padrão de fábrica
 do RetroArch 1.22.2 (a versão que `ensure_retroarch_installed` sempre instala) — se algum

@@ -63,21 +63,26 @@ export const KEY_CODE_TO_RETROARCH: Record<string, string> = {
  * forward" toda vez que apertava A). Assume a instalação gerenciada padrão
  * (`ensure_retroarch_installed`, sempre a mesma versão fixa) sem hotkeys
  * customizadas manualmente pelo usuário no menu do RetroArch.
+ *
+ * Só um AVISO, não bloqueio (decisão do Bruno, 11/08/2026): algumas teclas
+ * "óbvias" de movimento (WASD, por exemplo) colidem com hotkey — travar de
+ * vez tiraria opções razoáveis do usuário. Quem calibra decide se quer
+ * usar mesmo assim (ver `KeyboardCalibration.tsx`).
  */
-export const RESERVED_HOTKEYS = new Set([
-  "escape", // input_exit_emulator
-  "k", // input_frame_advance
-  "l", // input_hold_fast_forward
-  "e", // input_hold_slowmotion
-  "f4", // input_load_state
-  "f1", // input_menu_toggle
-  "p", // input_pause_toggle
-  "h", // input_reset
-  "r", // input_rewind
-  "f2", // input_save_state
-  "f8", // input_screenshot
-  "m", // input_shader_next
-  "n", // input_shader_prev
-  "space", // input_toggle_fast_forward
-  "f", // input_toggle_fullscreen
-]);
+export const RESERVED_HOTKEYS: Record<string, string> = {
+  escape: "Sair do emulador",
+  k: "Avançar 1 frame",
+  l: "Avançar rápido (segurar)",
+  e: "Câmera lenta (segurar)",
+  f4: "Carregar estado salvo",
+  f1: "Abrir menu do RetroArch",
+  p: "Pausar",
+  h: "Reiniciar o jogo",
+  r: "Rebobinar (rewind)",
+  f2: "Salvar estado",
+  f8: "Capturar tela",
+  m: "Próximo shader",
+  n: "Shader anterior",
+  space: "Avançar rápido (alternar)",
+  f: "Tela cheia (alternar)",
+};

@@ -10,23 +10,40 @@ interface Props {
   onCancel: () => void;
 }
 
+interface PendingKey {
+  retroKey: string;
+  reason: string;
+}
+
 /**
  * Mesma mecânica do `GamepadCalibration` (aperta cada botão, um de cada
  * vez), só que capturando `KeyboardEvent` em vez de `Gamepad.buttons` — é
  * a alternativa à tela de input do próprio RetroArch, considerada confusa
- * (IDEAS.md #009). Bloqueia teclas que colidem com hotkeys globais do
- * RetroArch ou que já foram usadas nesse mesmo mapeamento — foi
- * exatamente esse tipo de colisão que causou o bug do "avanço aleatório"
- * durante os testes de multiplayer de hoje.
+ * (IDEAS.md #009). Teclas que colidem com uma hotkey global do RetroArch
+ * ou que já foram usadas nesse mesmo mapeamento não são bloqueadas — só
+ * avisadas, com confirmação (decisão do Bruno, 11/08/2026: travar de vez
+ * tiraria opções razoáveis tipo WASD; quem calibra decide e assume o
+ * risco de colisão, ex: o bug do "avanço aleatório" que corrigimos nos
+ * testes de multiplayer de hoje).
  */
 export function KeyboardCalibration({ player, onComplete, onCancel }: Props) {
   const [step, setStep] = useState(0);
   const [mapping, setMapping] = useState<KeyboardMapping>({});
   const [warning, setWarning] = useState<string | null>(null);
+  const [pendingKey, setPendingKey] = useState<PendingKey | null>(null);
   const mappingRef = useRef(mapping);
   mappingRef.current = mapping;
+  const pendingKeyRef = useRef(pendingKey);
+  pendingKeyRef.current = pendingKey;
 
   const currentButton: RetroPadButton | undefined = CALIBRATION_ORDER[step];
+
+  function commitKey(button: RetroPadButton, retroKey: string) {
+    setWarning(null);
+    setPendingKey(null);
+    setMapping((prev) => ({ ...prev, [button]: retroKey }));
+    setStep((s) => s + 1);
+  }
 
   useEffect(() => {
     if (!currentButton) return; // calibração terminou
@@ -34,24 +51,33 @@ export function KeyboardCalibration({ player, onComplete, onCancel }: Props) {
 
     function handleKeyDown(e: KeyboardEvent) {
       e.preventDefault();
-      const retroKey = KEY_CODE_TO_RETROARCH[e.code];
+      if (pendingKeyRef.current) return; // aguardando confirmação, ignora novas teclas
 
+      const retroKey = KEY_CODE_TO_RETROARCH[e.code];
       if (!retroKey) {
         setWarning(`Tecla "${e.code}" não é suportada — tenta outra.`);
         return;
       }
-      if (RESERVED_HOTKEYS.has(retroKey)) {
-        setWarning(`Essa tecla já é um atalho global do RetroArch (ex: avançar rápido, salvar estado) — escolha outra.`);
+
+      const hotkeyAction = RESERVED_HOTKEYS[retroKey];
+      if (hotkeyAction) {
+        setWarning(null);
+        setPendingKey({
+          retroKey,
+          reason: `Essa tecla já é "${hotkeyAction}" no RetroArch — os dois vão disparar juntos se você continuar.`,
+        });
         return;
       }
       if (Object.values(mappingRef.current).includes(retroKey)) {
-        setWarning(`Você já usou essa tecla pra outro botão nesse mapeamento.`);
+        setWarning(null);
+        setPendingKey({
+          retroKey,
+          reason: "Você já usou essa tecla pra outro botão desse mapeamento.",
+        });
         return;
       }
 
-      setWarning(null);
-      setMapping((prev) => ({ ...prev, [button]: retroKey }));
-      setStep((s) => s + 1);
+      commitKey(button, retroKey);
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -60,6 +86,7 @@ export function KeyboardCalibration({ player, onComplete, onCancel }: Props) {
 
   function handleSkip() {
     setWarning(null);
+    setPendingKey(null);
     setStep((s) => s + 1);
   }
 
@@ -95,14 +122,35 @@ export function KeyboardCalibration({ player, onComplete, onCancel }: Props) {
             Aperte a tecla pra: <strong>{BUTTON_LABELS[currentButton]}</strong>
           </p>
           {warning && <p className="keyboard-calibration__warning">{warning}</p>}
-          <div className="keyboard-calibration__actions">
-            <button className="keyboard-calibration__cancel" onClick={handleSkip}>
-              Pular este botão
-            </button>
-            <button className="keyboard-calibration__cancel" onClick={onCancel}>
-              Cancelar
-            </button>
-          </div>
+
+          {pendingKey ? (
+            <>
+              <p className="keyboard-calibration__warning">{pendingKey.reason}</p>
+              <div className="keyboard-calibration__actions">
+                <button
+                  className="btn-scan"
+                  onClick={() => commitKey(currentButton, pendingKey.retroKey)}
+                >
+                  Usar mesmo assim
+                </button>
+                <button
+                  className="keyboard-calibration__cancel"
+                  onClick={() => setPendingKey(null)}
+                >
+                  Escolher outra tecla
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="keyboard-calibration__actions">
+              <button className="keyboard-calibration__cancel" onClick={handleSkip}>
+                Pular este botão
+              </button>
+              <button className="keyboard-calibration__cancel" onClick={onCancel}>
+                Cancelar
+              </button>
+            </div>
+          )}
         </>
       )}
 
