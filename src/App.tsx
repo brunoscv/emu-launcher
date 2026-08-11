@@ -16,6 +16,7 @@ import { GameList } from "./components/GameList";
 import { SystemSelector } from "./components/SystemSelector";
 import { AlphabetTabs, letterGroupOf } from "./components/AlphabetTabs";
 import { Pagination } from "./components/Pagination";
+import { MultiplayerPanel } from "./components/MultiplayerPanel";
 import "./styles/theme.css";
 
 const PAGE_SIZE = 50;
@@ -32,6 +33,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMultiplayer, setShowMultiplayer] = useState(false);
   const [installingRetroArch, setInstallingRetroArch] = useState(false);
   const [playerCounts, setPlayerCounts] = useState<Record<string, number>>({});
   const [enriching, setEnriching] = useState(false);
@@ -208,9 +210,21 @@ export default function App() {
         <div className="app-header__scan">
           <button
             className="btn-scan"
-            onClick={() => setShowSettings((v) => !v)}
+            onClick={() => {
+              setShowSettings((v) => !v);
+              setShowMultiplayer(false);
+            }}
           >
             {showSettings ? "Fechar configurações" : "⚙ Consoles"}
+          </button>
+          <button
+            className="btn-scan"
+            onClick={() => {
+              setShowMultiplayer((v) => !v);
+              setShowSettings(false);
+            }}
+          >
+            {showMultiplayer ? "Fechar multiplayer" : "🎮 Multiplayer"}
           </button>
           <button className="btn-scan" onClick={handleReindex} disabled={reindexing}>
             {reindexing ? (
@@ -256,6 +270,10 @@ export default function App() {
               setShowSettings(false);
             }}
           />
+        </main>
+      ) : showMultiplayer ? (
+        <main className="app-main">
+          <MultiplayerPanel />
         </main>
       ) : (
         <>

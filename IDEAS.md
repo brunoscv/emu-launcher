@@ -356,6 +356,20 @@ ROM, hospedando netplay na porta 55435). Fecha sozinho pouco depois por não ter
 netplay de verdade conectando nesse teste isolado — comportamento esperado, a sessão
 completa com cliente real já foi validada manualmente na Fase 3.
 
+**Bug encontrado e corrigido depois (10/08/2026), escrevendo o `INSTALL.md`:** o disparo
+do host nunca chamava `ensure_retroarch_installed` — só calculava o caminho esperado
+(`retroarch::expected_installation()`, via `systems::list_systems()`), sem garantir que o
+arquivo existisse. No cliente desktop isso não aparecia porque o `App.tsx` já chama
+`ensure_retroarch_installed` antes de jogar; o servidor headless não tinha esse passo
+equivalente, então a primeira partida real num PC dedicado limpo teria falhado. Corrigido:
+`lobby::launch_host` agora é `async` e chama `retroarch::ensure_retroarch_installed()`
+antes de tudo. Como isso pode levar minutos (download de ~450MB na primeira vez),
+`maybe_start_match` foi separado em duas partes — uma síncrona que só decide "deve
+iniciar?" (dentro do lock, rápida) e `start_match` (`pub async fn`, fora do lock, chamada
+numa `tokio::spawn` separada) que faz o trabalho pesado. Segurar o `std::sync::Mutex` das
+salas por minutos travaria toda e qualquer outra sala do servidor, não só a que está
+iniciando — daí a separação.
+
 ### Risco em aberto: Multitap (3-4 jogadores) via netplay
 
 Achei uma issue aberta desde 2020 no GitHub do RetroArch (#10424) relatando que o Multitap
@@ -368,13 +382,35 @@ O código do 5c não muda dependendo do resultado (funciona igual pra 2 ou 4 jog
 Multitap é só uma linha a mais na config); o risco é inteiramente do lado do RetroArch, não
 do nosso código.
 
-### Próximos cortes (ainda não implementados)
+### Corte 5d — UI do lado do cliente (✅ implementado, ⏳ sem conferência visual)
 
-1. UI do lado do cliente (App.tsx) pra criar/entrar em sala, ver a sala de espera e marcar
-   pronto, e reagir ao `MatchStarting` chamando o `launch_emulator` local com
-   `--connect`/`--port` — hoje só existe o protocolo no servidor, testado via cliente Rust
-   de teste; o cliente real ainda conecta manualmente por linha de comando.
-2. Validar Multitap de verdade (3-4 jogadores reais) — ver risco acima.
+Tela nova "🎮 Multiplayer" (`src/components/MultiplayerPanel.tsx`), botão no header do
+`App.tsx` ao lado de "⚙ Consoles":
+
+- `src/types/lobby.ts` — `ClientMessage`/`ServerMessage`/`PlayerView` espelhando
+  `protocol.rs` (incluindo a mensagem `Joined`, adicionada durante esse corte — ver nota
+  abaixo).
+- `src/lobby/useLobbyClient.ts` — hook que abre um `WebSocket` cru direto do frontend (o
+  webview do Tauri já suporta a API nativa do browser, não precisa passar pelo lado Rust
+  pra isso).
+- Fluxo: digitar IP do servidor + apelido → conecta → lista os jogos do servidor (pra
+  criar sala) ou entra com código → sala de espera com status de pronto de cada jogador →
+  ao receber `MatchStarting`, resolve o `system`/`game_name` na biblioteca **local** (nomes
+  batem, caminhos não — cada máquina tem o arquivo em pasta diferente), garante o
+  RetroArch instalado (`ensure_retroarch_installed`) e dispara `launch_emulator` com
+  `--connect <ip_do_servidor> --port <host_port>` anexado aos `extra_args` normais.
+
+**Gap de protocolo encontrado e corrigido durante esse corte:** o servidor nunca dizia ao
+cliente qual `PlayerView` da sala era ele mesmo (apelido não é único, dois jogadores podem
+escolher o mesmo nome) — adicionada `ServerMessage::Joined { player_id }`, mandada só pra
+quem acabou de criar/entrar (não é broadcast), antes do `RoomState`. Os testes de sala
+(`server::tests::*`) foram atualizados pra essa nova mensagem na sequência.
+
+**O que foi validado:** protocolo ponta a ponta (mesmos testes Rust reais da 5b/5c, agora
+cobrindo `Joined`), TypeScript compilando limpo, `vite build` empacotando sem erro.
+**O que falta:** a interação de verdade na tela (clicar em conectar/criar sala/ver a sala
+atualizando ao vivo) — sem ferramenta de automação de UI nativa disponível, precisa de
+conferência manual do Bruno.
 
 **Depende de:** #003, #004, #005 (implementados) e #006 (acesso pela internet, ainda não
 feito — os cortes de hoje só foram testados em LAN/localhost).

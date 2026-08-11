@@ -2,6 +2,7 @@ use crate::launcher;
 use crate::library;
 use crate::player_overrides;
 use crate::protocol::{PlayerView, ServerMessage};
+use crate::retroarch;
 use crate::scanner::RomEntry;
 use crate::systems;
 use rand::Rng;
@@ -118,23 +119,28 @@ fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String>
     Ok(path)
 }
 
-/// Dispara o RetroArch host de verdade pra sala. Sempre via
-/// `systems::list_systems()` (que por sua vez usa
-/// `retroarch::expected_installation()`) — nunca um binário solto do PATH,
-/// é a lição que a Fase 3/#005 deixou clara.
+/// Baixa/instala o RetroArch se preciso (`ensure_retroarch_installed` —
+/// idempotente, só demora de verdade na primeira partida da máquina) e
+/// dispara o host. Sempre via `systems::list_systems()`/
+/// `retroarch::expected_installation()`, nunca um binário solto do PATH —
+/// é a lição que a Fase 3/#005 deixou clara. `async` porque o download
+/// pode levar minutos; por isso quem chama (`start_match`) faz isso FORA
+/// do lock das salas (ver nota lá).
 ///
 /// Limitação conhecida deste corte: porta de netplay e arquivo de config
 /// são fixos (`NETPLAY_PORT`, `server_session.cfg`) — o servidor hospeda
 /// uma partida por vez. Rodar duas salas completando ao mesmo tempo não é
 /// suportado ainda; não é o cenário de uso atual (Bruno + amigos numa
 /// partida por vez), mas fica registrado pra quando/se importar.
-fn launch_host(room: &Room) -> Result<u16, String> {
+async fn launch_host(game: &RomEntry, max_players: i64) -> Result<u16, String> {
+    retroarch::ensure_retroarch_installed().await?;
+
     let system_def = systems::list_systems()?
         .into_iter()
-        .find(|s| s.id == room.game.system)
-        .ok_or_else(|| format!("Nenhum emulador configurado pro sistema \"{}\"", room.game.system))?;
+        .find(|s| s.id == game.system)
+        .ok_or_else(|| format!("Nenhum emulador configurado pro sistema \"{}\"", game.system))?;
 
-    let cfg_path = write_headless_config(room.max_players)?;
+    let cfg_path = write_headless_config(max_players)?;
 
     let mut args = system_def.extra_args.clone();
     args.push("--host".to_string());
@@ -143,40 +149,57 @@ fn launch_host(room: &Room) -> Result<u16, String> {
     args.push("--appendconfig".to_string());
     args.push(cfg_path.to_string_lossy().to_string());
 
-    launcher::spawn_emulator(&system_def.emulator_path, &room.game.path, &args, |exit_code| {
+    launcher::spawn_emulator(&system_def.emulator_path, &game.path, &args, |exit_code| {
         println!("RetroArch host encerrou (exit code {exit_code:?})");
     })?;
 
     Ok(NETPLAY_PORT)
 }
 
-/// Chamado depois de qualquer mudança de prontidão. Só dispara quando a
-/// sala está cheia (todos os assentos de `max_players` ocupados) e todo
-/// mundo marcou pronto — e só uma vez (`room.started`).
-fn maybe_start_match(room: &mut Room) {
+/// Só decide se deve iniciar (sala cheia + todo mundo pronto, e só uma vez
+/// — `room.started`), sem fazer nenhum trabalho assíncrono. Devolve o que
+/// `start_match` precisa pra disparar de verdade depois, fora do lock.
+fn maybe_start_match(room: &mut Room) -> Option<(RomEntry, i64)> {
     if room.started {
-        return;
+        return None;
     }
     if (room.players.len() as i64) < room.max_players {
-        return;
+        return None;
     }
     if !room.players.iter().all(|p| p.ready) {
-        return;
+        return None;
     }
 
     room.started = true;
+    Some((room.game.clone(), room.max_players))
+}
 
-    match launch_host(room) {
+/// Dispara o host de verdade — chamado FORA do lock das salas (o
+/// `ensure_retroarch_installed` dentro de `launch_host` pode levar minutos
+/// baixando na primeira vez; segurar o `std::sync::Mutex` das salas por
+/// tanto tempo travaria toda e qualquer outra sala do servidor). Rebloqueia
+/// só no final, pra anunciar o resultado.
+pub async fn start_match(rooms: Rooms, code: String, game: RomEntry, max_players: i64) {
+    let result = launch_host(&game, max_players).await;
+
+    let Ok(mut rooms_guard) = rooms.lock() else {
+        return;
+    };
+    let Some(room) = rooms_guard.get_mut(&code) else {
+        return; // sala sumiu (todo mundo saiu) enquanto o RetroArch instalava
+    };
+
+    match result {
         Ok(host_port) => broadcast_message(
             room,
             &ServerMessage::MatchStarting {
                 host_port,
-                system: room.game.system.clone(),
-                game_name: room.game.name.clone(),
+                system: game.system,
+                game_name: game.name,
             },
         ),
         Err(e) => {
-            room.started = false; // permite tentar de novo (ex: usuário desmarca e marca pronto de novo)
+            room.started = false; // permite tentar de novo (ex: desmarca e marca pronto de novo)
             broadcast_message(room, &ServerMessage::Error { message: e });
         }
     }
@@ -251,7 +274,15 @@ pub fn join_room(
     Ok(())
 }
 
-pub fn set_ready(rooms: &Rooms, code: &str, player_id: &str, ready: bool) -> Result<(), String> {
+/// `Ok(Some((game, max_players)))` quando essa chamada foi a que completou a
+/// sala — quem chama deve disparar `start_match` com isso, fora de
+/// qualquer lock (ver `start_match`).
+pub fn set_ready(
+    rooms: &Rooms,
+    code: &str,
+    player_id: &str,
+    ready: bool,
+) -> Result<Option<(RomEntry, i64)>, String> {
     let mut rooms_guard = rooms.lock().map_err(|_| lock_err())?;
     let room = rooms_guard
         .get_mut(code)
@@ -265,8 +296,7 @@ pub fn set_ready(rooms: &Rooms, code: &str, player_id: &str, ready: bool) -> Res
     player.ready = ready;
 
     broadcast(room);
-    maybe_start_match(room);
-    Ok(())
+    Ok(maybe_start_match(room))
 }
 
 /// Chamado quando a conexão cai. Sala vazia é descartada; sala com gente

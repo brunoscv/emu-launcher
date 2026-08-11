@@ -71,20 +71,34 @@ async fn handle_connection(stream: TcpStream, peer_addr: SocketAddr, rooms: Room
                     }
                     Ok(ClientMessage::CreateRoom { rom_path, nickname }) => {
                         match lobby::create_room(&rooms, rom_path, nickname, player_id.clone(), tx.clone()) {
-                            // sucesso já foi anunciado via broadcast (chega pelo rx abaixo)
-                            Ok(code) => { current_room = Some(code); None }
+                            // o RoomState em si já foi anunciado via broadcast (chega pelo rx
+                            // logo em seguida) — isso aqui só avisa quem é "eu" nele.
+                            Ok(code) => {
+                                current_room = Some(code);
+                                Some(ServerMessage::Joined { player_id: player_id.clone() })
+                            }
                             Err(e) => Some(ServerMessage::Error { message: e }),
                         }
                     }
                     Ok(ClientMessage::JoinRoom { code, nickname }) => {
                         match lobby::join_room(&rooms, &code, nickname, player_id.clone(), tx.clone()) {
-                            Ok(()) => { current_room = Some(code); None }
+                            Ok(()) => {
+                                current_room = Some(code);
+                                Some(ServerMessage::Joined { player_id: player_id.clone() })
+                            }
                             Err(e) => Some(ServerMessage::Error { message: e }),
                         }
                     }
                     Ok(ClientMessage::SetReady { ready }) => match &current_room {
                         Some(code) => match lobby::set_ready(&rooms, code, &player_id, ready) {
-                            Ok(()) => None,
+                            Ok(start) => {
+                                // ensure_retroarch_installed pode levar minutos (primeira vez
+                                // na máquina) — roda numa task separada, fora do lock das salas.
+                                if let Some((game, max_players)) = start {
+                                    tokio::spawn(lobby::start_match(rooms.clone(), code.clone(), game, max_players));
+                                }
+                                None
+                            }
                             Err(e) => Some(ServerMessage::Error { message: e }),
                         },
                         None => Some(ServerMessage::Error {
@@ -159,6 +173,14 @@ mod tests {
             .await
             .unwrap();
 
+        let joined = host_ws.next().await.unwrap().unwrap();
+        let ServerMessage::Joined { player_id: host_player_id } =
+            serde_json::from_str(joined.to_text().unwrap()).unwrap()
+        else {
+            panic!("esperava Joined logo após create_room");
+        };
+        assert!(!host_player_id.is_empty());
+
         let response = host_ws.next().await.unwrap().unwrap();
         let parsed: ServerMessage = serde_json::from_str(response.to_text().unwrap()).unwrap();
         let ServerMessage::RoomState { code, players, .. } = parsed else {
@@ -166,6 +188,7 @@ mod tests {
         };
         assert_eq!(players.len(), 1);
         assert_eq!(players[0].nickname, "Bruno");
+        assert_eq!(players[0].id, host_player_id);
 
         let mut guest_ws = connect().await;
         guest_ws
@@ -180,6 +203,13 @@ mod tests {
             .await
             .unwrap();
 
+        // guest recebe Joined primeiro (só pra ele, não é broadcast)
+        let guest_joined = guest_ws.next().await.unwrap().unwrap();
+        let ServerMessage::Joined { .. } = serde_json::from_str(guest_joined.to_text().unwrap()).unwrap()
+        else {
+            panic!("esperava Joined no guest após join_room");
+        };
+
         // host recebe o RoomState atualizado (broadcast do join)
         let host_update = host_ws.next().await.unwrap().unwrap();
         let ServerMessage::RoomState { players, .. } =
@@ -189,7 +219,7 @@ mod tests {
         };
         assert_eq!(players.len(), 2);
 
-        // guest também recebe a confirmação da própria entrada
+        // guest também recebe o RoomState (broadcast, chega depois do Joined)
         let guest_update = guest_ws.next().await.unwrap().unwrap();
         let ServerMessage::RoomState { players, .. } =
             serde_json::from_str(guest_update.to_text().unwrap()).unwrap()
@@ -244,6 +274,7 @@ mod tests {
             ))
             .await
             .unwrap();
+        host_ws.next().await.unwrap().unwrap(); // Joined
         let response = host_ws.next().await.unwrap().unwrap();
         let ServerMessage::RoomState { code, max_players, .. } =
             serde_json::from_str(response.to_text().unwrap()).unwrap()
@@ -263,6 +294,7 @@ mod tests {
             ))
             .await
             .unwrap();
+        guest_ws.next().await.unwrap().unwrap(); // Joined
         host_ws.next().await.unwrap().unwrap(); // host vê o join
         guest_ws.next().await.unwrap().unwrap(); // guest vê a própria confirmação
 

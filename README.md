@@ -56,6 +56,9 @@ npm run tauri dev
 No primeiro uso, abra "⚙ Consoles" e configure a pasta de roms de cada sistema que você
 quer emular, depois clique em "Reindexar biblioteca".
 
+Pra rodar em **modo servidor** (`--server`, headless, hospeda partidas multiplayer pros
+amigos conectarem — ver `IDEAS.md` #007), veja [`INSTALL.md`](./INSTALL.md).
+
 ## Estrutura
 
 ```

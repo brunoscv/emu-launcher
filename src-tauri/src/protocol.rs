@@ -29,6 +29,10 @@ pub enum ServerMessage {
         players: Vec<PlayerView>,
     },
     Error { message: String },
+    /// Mandado só pra quem acabou de criar/entrar na sala (não é broadcast)
+    /// — sem isso o cliente não tem como saber qual `PlayerView` do
+    /// `RoomState` é ele mesmo (apelido não é único).
+    Joined { player_id: String },
     /// Sala completou (cheia + todos prontos) e o servidor já disparou o
     /// RetroArch host (Fase 5c). O cliente resolve o core/rom localmente
     /// pelo `system` + `game_name` (mesmo `systems::list_systems()` que já
