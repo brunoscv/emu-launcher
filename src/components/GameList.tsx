@@ -1,8 +1,6 @@
 import type { RomEntry } from "../types/rom";
 import { systemColor, systemLabel } from "./systemMeta";
 
-const PLAYER_COUNT_OPTIONS = [2, 3, 4];
-
 interface Props {
   roms: RomEntry[];
   runningPath: string | null;
@@ -12,7 +10,6 @@ interface Props {
   playerCounts: Record<string, number>;
   onPlay: (rom: RomEntry) => void;
   onConfigureSystems: () => void;
-  onSetPlayerCount: (rom: RomEntry, maxPlayers: number) => void;
   onHost: (rom: RomEntry) => void;
   onClient: (rom: RomEntry) => void;
 }
@@ -48,7 +45,6 @@ export function GameList({
   playerCounts,
   onPlay,
   onConfigureSystems,
-  onSetPlayerCount,
   onHost,
   onClient,
 }: Props) {
@@ -102,19 +98,17 @@ export function GameList({
                   </p>
                 </div>
 
-                <select
+                <span
                   className="game-row__players"
                   data-overridden={maxPlayers > 2}
-                  value={maxPlayers}
-                  title="Número máximo de jogadores (multiplayer/Multitap)"
-                  onChange={(e) => onSetPlayerCount(rom, Number(e.target.value))}
+                  title={
+                    maxPlayers > 1
+                      ? `Até ${maxPlayers} jogador(es) (multiplayer)`
+                      : "Só 1 jogador — sem multiplayer"
+                  }
                 >
-                  {PLAYER_COUNT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      👥 {n}
-                    </option>
-                  ))}
-                </select>
+                  👥 {maxPlayers}
+                </span>
 
                 {isRunning ? (
                   <span className="game-row__running">Rodando...</span>

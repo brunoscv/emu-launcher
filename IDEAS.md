@@ -500,13 +500,18 @@ Plano de integração:
 
 ---
 
-## 🚧 #008 — Host/Cliente por jogo, sem servidor dedicado sempre no ar
+## ✅ #008 — Host/Cliente por jogo, sem servidor dedicado sempre no ar
 
-**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026 · **Em andamento:** 11/08/2026
-(implementado, lado "Host"/fallback embutido validado ao vivo — log real: `Lobby embutido
-escutando em 0.0.0.0:7777 (servidor dedicado offline/não configurado)` +
-`Cliente conectado: 127.0.0.1:...`. Falta validar o lado "Cliente" numa segunda máquina de
-verdade antes de marcar como ✅.)
+**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026 · **Implementada em:**
+11/08/2026 — validado ao vivo ponta a ponta nas duas máquinas (Host aqui via fallback
+embutido, Cliente no notebook com IP + código, os dois marcaram pronto e a partida subiu
+nos dois lados).
+
+**Nota de arrastamento de documentação (11/08/2026):** essa mudança supera parte do que
+`CLAUDE.md` (Fase 6, item "Modo Standalone vs. Servidor na UI") e `INSTALL.md` descrevem
+como fluxo único (servidor dedicado sempre no ar, tela genérica "🎮 Multiplayer") — os dois
+arquivos ainda não foram atualizados pra refletir o fluxo novo. Registrado aqui pra não
+esquecer; atualizar quando fizer sentido parar pra revisar a documentação.
 
 **A ideia:** trocar o fluxo atual (tela separada "🎮 Multiplayer", conectar num IP de
 servidor que já precisa estar rodando `--server` em outra máquina, escolher o jogo da
@@ -628,9 +633,10 @@ tem tela nenhuma (foi tudo feito hoje editando o `.cfg` direto por mim).
 
 ---
 
-## 🔧 #010 — Número de jogadores como metadado puro + validação no lobby
+## ✅ #010 — Número de jogadores como metadado puro + validação no lobby
 
-**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026
+**Registrada em:** 11/08/2026 · **Planejada em:** 11/08/2026 · **Implementada em:**
+11/08/2026
 
 **A ideia:** o seletor "👥 2/3/4" que hoje aparece editável em cada linha da `GameList`
 (#004, já implementado) deveria virar só um **badge informativo** (ícone + número máximo),
@@ -652,30 +658,45 @@ secundário escondido) — 100% automático via IGDB. Busca do IGDB continua bot
 (`enrich_player_counts`, como já é hoje), não entra no `reindex_library`, por causa do
 rate limit da API.
 
-### Plano técnico inicial
+**Descoberta durante a implementação — o IGDB não sabe dizer "1 jogador":** o campo que
+usamos (`multiplayer_modes`) só existe quando o jogo TEM multiplayer documentado; ausência
+significa "sem dado", não "confirmado single-player" (por isso o padrão de segurança
+sempre foi assumir 2). Decisão final (11/08/2026, com o Bruno): jogo **já verificado**
+(existe linha em `game_player_auto`) sem nenhum dado de multiplayer vira `1` de verdade
+(esconde Host/Cliente); jogo **nunca verificado** continua assumindo 2, igual antes. A
+tabela `game_player_overrides` (override manual) **continua existindo** — só saiu da UI,
+não do banco: se o IGDB errar pra algum jogo específico, a correção agora é editar essa
+tabela direto no SQLite (`~/.local/share/emu-launcher/library.db`), sem precisar de tela
+nenhuma — o app volta a respeitar isso automaticamente (`get_player_counts` continua dando
+precedência ao override sobre o valor automático).
 
-1. **`GameList.tsx`** — troca o `<select>` "👥 2/3/4" por um badge somente-leitura
-   (ícone + número), lido direto de `get_player_counts` (já existe). Sem `onChange`, sem
-   `onSetPlayerCount` — remove essa prop da árvore de componentes.
-2. **Remove `save_player_override` do frontend** (command Rust pode continuar existindo por
-   enquanto, só sem chamador — decidir na hora se vale apagar de vez ou deixar morto por
-   segurança de rollback).
-3. **`get_player_counts`/`get_player_counts()` em `player_overrides.rs`** deixa de
-   considerar a tabela `game_player_overrides` na precedência — vira só
-   `COALESCE(automático, 2)`, não mais `COALESCE(override, automático, 2)`. Tabela
-   `game_player_overrides` fica sem uso (decidir na implementação: `DROP TABLE` numa
-   migração ou só abandonar).
-4. **`lobby.rs::join_room`** — hoje já rejeita entrada além do `max_players` com "Sala já
-   está cheia". Trocar a mensagem de erro por algo específico tipo `"Esse jogo aceita no
-   máximo {max_players} jogador(es)"` quando a rejeição for por causa do limite do jogo
-   (distinguir de sala genuinamente cheia por outro motivo, se existir esse caso).
-5. **Jogo de 1 jogador não oferece "Host"** (`GameList.tsx`, ligado ao #008) — esconder os
-   botões Host/Cliente quando `max_players <= 1`.
-6. **"Quando um jogador sai, a sala libera vaga"** — já é o comportamento de
-   `lobby::remove_player` hoje (remove da lista, `broadcast` do novo estado) — nenhuma
-   mudança necessária aqui, só confirmar que continua valendo com a mensagem de erro nova.
+### Plano técnico (implementado)
 
-**Depende de:** #004 (implementado, é a base disso). Badge "sem Host" depende do #008.
+1. **`GameList.tsx`** — troca o `<select>` "👥 2/3/4" por um `<span>` somente-leitura
+   (ícone + número), lido direto de `get_player_counts`. Sem `onChange`, sem
+   `onSetPlayerCount` — prop removida da árvore de componentes.
+2. **`player_overrides.rs::get_player_counts`** — query muda de
+   `COALESCE(override, auto, 2) WHERE > 2` pra `COALESCE(override, auto, 1) WHERE
+   override.rom_path IS NOT NULL OR auto.rom_path IS NOT NULL` — agora retorna TODO jogo já
+   verificado (não só quem tem mais de 2), incluindo os que resolvem pra `1`. Jogo ausente
+   do resultado (nunca verificado) continua caindo no `?? 2` do frontend / `.unwrap_or(2)`
+   do `max_players_for` (Rust).
+3. **`lobby.rs::create_room`** — rejeita criar sala pra jogo com `max_players <= 1`
+   ("não tem multiplayer"), reforçando no servidor o que a UI já esconde.
+4. **`lobby.rs::join_room`** — mensagem de erro agora inclui o limite do jogo:
+   `Sala "X" já está cheia — esse jogo aceita no máximo N jogador(es)`.
+5. **Remove `save_player_override` do frontend/UI** — o command Rust e a tabela
+   `game_player_overrides` continuam existindo de propósito (ver "Descoberta" acima), só
+   sem controle nenhum no app pra chamar isso; a correção agora é editar a tabela direto no
+   SQLite.
+6. **Jogo de 1 jogador não oferece "Host"** (`GameList.tsx`) — já coberto pelo item 1
+   (badge com `maxPlayers > 1` escondendo os botões Host/Cliente também).
+7. **"Quando um jogador sai, a sala libera vaga"** — já era o comportamento de
+   `lobby::remove_player` (remove da lista, `broadcast` do novo estado) — confirmado que
+   continua valendo, nenhuma mudança adicional necessária.
+
+**Depende de:** #004 (implementado, é a base disso) e #008 (implementado, botões Host/
+Cliente na `GameList` que essa ideia esconde/mostra).
 
 ---
 

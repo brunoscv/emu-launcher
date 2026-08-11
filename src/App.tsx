@@ -47,15 +47,6 @@ export default function App() {
     });
   }
 
-  async function handleSetPlayerCount(rom: RomEntry, maxPlayers: number) {
-    await invoke("save_player_override", {
-      romPath: rom.path,
-      maxPlayers,
-      usesMultitap: maxPlayers > 2,
-    });
-    refreshPlayerCounts();
-  }
-
   async function handleEnrichPlayerCounts() {
     setError(null);
     setEnriching(true);
@@ -298,7 +289,6 @@ export default function App() {
               playerCounts={playerCounts}
               onPlay={handlePlay}
               onConfigureSystems={() => setShowSettings(true)}
-              onSetPlayerCount={handleSetPlayerCount}
               onHost={(rom) => setLobby({ mode: "host", game: rom })}
               onClient={(rom) => setLobby({ mode: "client", game: rom })}
             />

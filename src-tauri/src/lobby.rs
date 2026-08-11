@@ -240,6 +240,10 @@ pub fn create_room(
         .ok_or_else(|| format!("Jogo \"{game_name}\" não encontrado na biblioteca do servidor"))?;
     let max_players = max_players_for(&game.path)?;
 
+    if max_players <= 1 {
+        return Err(format!("\"{game_name}\" não tem multiplayer (1 jogador)"));
+    }
+
     let mut rooms_guard = rooms.lock().map_err(|_| lock_err())?;
     let code = generate_code(&rooms_guard);
 
@@ -274,7 +278,10 @@ pub fn join_room(
         .ok_or_else(|| format!("Sala \"{code}\" não existe"))?;
 
     if room.players.len() as i64 >= room.max_players {
-        return Err(format!("Sala \"{code}\" já está cheia"));
+        return Err(format!(
+            "Sala \"{code}\" já está cheia — esse jogo aceita no máximo {} jogador(es)",
+            room.max_players
+        ));
     }
 
     room.players.push(Player {

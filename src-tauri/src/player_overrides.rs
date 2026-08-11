@@ -8,20 +8,24 @@ pub struct PlayerCount {
     pub max_players: i64,
 }
 
-/// Valor efetivo por jogo pra UI mostrar: override manual vence, senão usa o
-/// resultado automático do IGDB (`enrich_player_counts`), senão assume 2. Só
-/// retorna quem tem mais de 2 — a lista inteira não precisa saber disso, é
-/// tudo "2 jogadores" por padrão.
+/// Valor efetivo por jogo pra UI mostrar: override manual (IDEAS.md #010 —
+/// não tem mais controle na UI pra isso, mas a tabela continua sendo o jeito
+/// de corrigir na mão direto no SQLite quando o IGDB erra) vence; senão usa
+/// o resultado automático do IGDB (`enrich_player_counts`); um jogo já
+/// verificado que o IGDB não achou multiplayer nenhum vira `1` (esconde
+/// Host/Cliente — ver `GameList.tsx`). Jogo nunca verificado (sem linha em
+/// nenhuma das duas tabelas) fica de fora do resultado — quem chama assume
+/// 2 pra esse caso (estado desconhecido, não "sabidamente 1 jogador").
 #[tauri::command]
 pub fn get_player_counts() -> Result<Vec<PlayerCount>, String> {
     let conn = db::connect()?;
     let mut stmt = conn
         .prepare(
-            "SELECT g.rom_path, COALESCE(o.max_players, a.max_players, 2) AS effective
+            "SELECT g.rom_path, COALESCE(o.max_players, a.max_players, 1) AS effective
              FROM games g
              LEFT JOIN game_player_overrides o ON o.rom_path = g.rom_path
              LEFT JOIN game_player_auto a ON a.rom_path = g.rom_path
-             WHERE COALESCE(o.max_players, a.max_players, 2) > 2",
+             WHERE o.rom_path IS NOT NULL OR a.rom_path IS NOT NULL",
         )
         .map_err(|e| e.to_string())?;
 
