@@ -20,6 +20,7 @@ import { Pagination } from "./components/Pagination";
 import { LobbyScreen } from "./components/LobbyScreen";
 import { KeyboardSettings } from "./components/KeyboardSettings";
 import { HotkeysScreen } from "./components/HotkeysScreen";
+import { InternetSettings } from "./components/InternetSettings";
 import { buildKeyboardAppendConfigArgs } from "./keyboard/appendConfig";
 import "./styles/theme.css";
 
@@ -39,6 +40,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showKeyboardSettings, setShowKeyboardSettings] = useState(false);
   const [showHotkeys, setShowHotkeys] = useState(false);
+  const [showInternetSettings, setShowInternetSettings] = useState(false);
   const [lobby, setLobby] = useState<{ mode: "host" | "client"; game: RomEntry } | null>(null);
   const [installingRetroArch, setInstallingRetroArch] = useState(false);
   const [playerCounts, setPlayerCounts] = useState<Record<string, number>>({});
@@ -234,6 +236,9 @@ export default function App() {
           <button className="btn-scan" onClick={() => setShowHotkeys((v) => !v)}>
             {showHotkeys ? "Fechar hotkeys" : "🔑 Hotkeys"}
           </button>
+          <button className="btn-scan" onClick={() => setShowInternetSettings((v) => !v)}>
+            {showInternetSettings ? "Fechar" : "🌐 Jogar pela Internet"}
+          </button>
           <button className="btn-scan" onClick={handleReindex} disabled={reindexing}>
             {reindexing ? (
               <>
@@ -286,6 +291,10 @@ export default function App() {
       ) : showHotkeys ? (
         <main className="app-main">
           <HotkeysScreen onClose={() => setShowHotkeys(false)} />
+        </main>
+      ) : showInternetSettings ? (
+        <main className="app-main">
+          <InternetSettings onClose={() => setShowInternetSettings(false)} />
         </main>
       ) : lobby ? (
         <main className="app-main">

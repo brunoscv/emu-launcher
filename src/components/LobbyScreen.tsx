@@ -31,6 +31,16 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   const [hostOverride, setHostOverride] = useState("192.168.100.108");
   const [resolvedHost, setResolvedHost] = useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [publicHostAddress, setPublicHostAddress] = useState<string | null>(null);
+
+  // Só pra reexibir na sala junto do código — configurado em "🌐 Jogar pela
+  // Internet" (App.tsx). Sem isso setado, quem quiser jogar com alguém fora
+  // da rede local não tem o que passar pro amigo digitar.
+  useEffect(() => {
+    if (mode === "host") {
+      invoke<string | null>("get_public_host_address").then(setPublicHostAddress);
+    }
+  }, [mode]);
 
   const [roomState, setRoomState] = useState<
     Extract<ServerMessage, { type: "room_state" }> | null
@@ -270,6 +280,18 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           <p className="lobby-screen__room-code">
             Código da sala: <strong>{roomState.code}</strong>
           </p>
+          {mode === "host" &&
+            (publicHostAddress ? (
+              <p className="lobby-screen__public-address">
+                Pra amigo fora da rede: <strong>{publicHostAddress}</strong> + código{" "}
+                <strong>{roomState.code}</strong>
+              </p>
+            ) : (
+              <p className="lobby-screen__public-address lobby-screen__public-address--warn">
+                Sem endereço público configurado — só quem estiver na mesma rede consegue
+                entrar. Configura em "🌐 Jogar pela Internet" se quiser convidar alguém de fora.
+              </p>
+            ))}
           <p className="lobby-screen__game">
             {roomState.game.name} · {systemLabel(roomState.game.system)} · até {roomState.max_players}{" "}
             jogador(es)
@@ -404,6 +426,17 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           font-family: var(--font-mono);
           font-size: 1.1rem;
           color: var(--ink-primary);
+        }
+
+        .lobby-screen__public-address {
+          font-family: var(--font-mono);
+          font-size: 0.8rem;
+          color: var(--accent-teal);
+        }
+
+        .lobby-screen__public-address--warn {
+          color: var(--ink-muted);
+          font-family: var(--font-body);
         }
 
         .lobby-screen__game {

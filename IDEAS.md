@@ -947,6 +947,44 @@ necessário pra testar com menos gente que o máximo).
 
 ---
 
+## ✅ #017 — Tela "Jogar pela Internet" (acesso fora da LAN, adendo do #006)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O pedido:** tudo validado até aqui foi em LAN — pra jogar com amigos de verdade (casas
+diferentes), o roteador de quem hospeda precisa encaminhar portas pra fora, e a pessoa
+precisa saber pra qual endereço mandar o amigo conectar. Pedido explícito: instruções
+completas e visíveis, nada escondido, e o endereço não pode ficar fixo no código — o
+usuário escolhe o dele.
+
+**O que foi feito:**
+1. **`settings.rs`** — `get/save_public_host_address` (mesmo padrão do `dedicated_server_host`
+   que já existia): endereço público/DDNS digitado pelo usuário, guardado só pra reexibir —
+   a gente não descobre isso sozinho (IP público muda, hostname de DDNS não tem como
+   inferir). `get_local_lan_ip` (novo) — detecta o IP local da máquina via truque de socket
+   UDP "conectado" sem enviar pacote nenhum (kernel escolhe a interface, não precisa de
+   internet de verdade), pra instrução saber pra qual IP apontar a regra do roteador.
+2. **`InternetSettings.tsx`** (novo, botão "🌐 Jogar pela Internet" no header) — as 3 portas
+   que precisam ser liberadas (TCP 7777 lobby, TCP+UDP 55435 netplay) numa tabela, passo a
+   passo de painel de roteador (nome genérico da seção, já que muda por marca), o IP local
+   detectado, campo pro endereço público, e avisos honestos: teste de porta aberta de fora
+   da rede, CGNAT (bem comum no Brasil — quando acontece, port-forward NUNCA funciona,
+   não importa a configuração, só VPN tipo Tailscale resolveria — ainda não implementado),
+   e que só quem hospeda precisa fazer isso (quem só entra como cliente não mexe em nada).
+3. **`LobbyScreen.tsx`** — sala de host agora reexibe o endereço público salvo lado a lado
+   com o código, pronto pra copiar e mandar pro amigo. Sem endereço configurado, mostra um
+   aviso softzinho em vez de simplesmente omitir a informação.
+
+**O que fica de fora, de propósito:** a gente não abre porta sozinho (não dá, é
+configuração do roteador) nem detecta o IP público automaticamente (evita uma chamada de
+rede externa desnecessária, e DDNS não tem como advinhar de jeito nenhum) — o usuário
+sempre digita o que ele mesmo configurou.
+
+**Depende de:** #006 (esta é a primeira fatia implementada dele — falta ainda testar de
+verdade com alguém de fora da rede, e o Plano B de VPN/CGNAT continua não implementado).
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra
