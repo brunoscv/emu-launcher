@@ -31,6 +31,16 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   const [hostOverride, setHostOverride] = useState("192.168.100.108");
   const [resolvedHost, setResolvedHost] = useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [publicHostAddress, setPublicHostAddress] = useState<string | null>(null);
+
+  // Só pra reexibir na sala junto do código — configurado em "🌐 Jogar pela
+  // Internet" (App.tsx). Sem isso setado, quem quiser jogar com alguém fora
+  // da rede local não tem o que passar pro amigo digitar.
+  useEffect(() => {
+    if (mode === "host") {
+      invoke<string | null>("get_public_host_address").then(setPublicHostAddress);
+    }
+  }, [mode]);
 
   const [roomState, setRoomState] = useState<
     Extract<ServerMessage, { type: "room_state" }> | null
@@ -169,6 +179,10 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     send({ type: "set_ready", ready: !me?.ready });
   }
 
+  function handleForceStart() {
+    send({ type: "force_start" });
+  }
+
   // Volta pro formulário inicial depois de um erro (código errado, IP
   // errado, etc.) sem precisar fechar e reabrir a tela inteira — antes
   // disso a única saída era "Cancelar" e começar tudo de novo.
@@ -266,6 +280,18 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           <p className="lobby-screen__room-code">
             Código da sala: <strong>{roomState.code}</strong>
           </p>
+          {mode === "host" &&
+            (publicHostAddress ? (
+              <p className="lobby-screen__public-address">
+                Pra amigo fora da rede: <strong>{publicHostAddress}</strong> + código{" "}
+                <strong>{roomState.code}</strong>
+              </p>
+            ) : (
+              <p className="lobby-screen__public-address lobby-screen__public-address--warn">
+                Sem endereço público configurado — só quem estiver na mesma rede consegue
+                entrar. Configura em "🌐 Jogar pela Internet" se quiser convidar alguém de fora.
+              </p>
+            ))}
           <p className="lobby-screen__game">
             {roomState.game.name} · {systemLabel(roomState.game.system)} · até {roomState.max_players}{" "}
             jogador(es)
@@ -284,9 +310,24 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
               <span className="spinner" /> Partida começando, conectando no host...
             </p>
           ) : (
-            <button className="btn-scan" onClick={handleToggleReady}>
-              {me?.ready ? "Cancelar pronto" : "Pronto"}
-            </button>
+            <div className="lobby-screen__actions">
+              <button className="btn-scan" onClick={handleToggleReady}>
+                {me?.ready ? "Cancelar pronto" : "Pronto"}
+              </button>
+
+              {mode === "host" &&
+                roomState.players.length >= 2 &&
+                roomState.players.length < roomState.max_players &&
+                roomState.players.every((p) => p.ready) && (
+                  <button
+                    className="lobby-screen__force-start"
+                    onClick={handleForceStart}
+                    title={`Começa com ${roomState.players.length} de ${roomState.max_players} — os slots extras do Multitap ficam sem ninguém`}
+                  >
+                    Iniciar mesmo assim ({roomState.players.length}/{roomState.max_players})
+                  </button>
+                )}
+            </div>
           )}
 
           <button className="lobby-screen__cancel" onClick={handleClose}>
@@ -364,6 +405,15 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           margin-top: 0.4rem;
         }
 
+        .lobby-screen__force-start {
+          background: transparent;
+          border: 1px solid var(--border-strong);
+          border-radius: var(--radius-sm);
+          color: var(--ink-muted);
+          padding: 0.55rem 1rem;
+          font-size: 0.85rem;
+        }
+
         .lobby-screen__status {
           display: flex;
           align-items: center;
@@ -376,6 +426,17 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           font-family: var(--font-mono);
           font-size: 1.1rem;
           color: var(--ink-primary);
+        }
+
+        .lobby-screen__public-address {
+          font-family: var(--font-mono);
+          font-size: 0.8rem;
+          color: var(--accent-teal);
+        }
+
+        .lobby-screen__public-address--warn {
+          color: var(--ink-muted);
+          font-family: var(--font-body);
         }
 
         .lobby-screen__game {

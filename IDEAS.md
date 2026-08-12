@@ -890,6 +890,101 @@ grandes, 690×490 sem otimização) — por ora é só teste, sem tratamento de 
 
 ---
 
+## ✅ #015 — "Iniciar mesmo assim" quando a sala não fecha o Multitap
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O problema:** salas só disparam a partida quando ficam CHEIAS
+(`room.players.len() >= room.max_players`, `lobby.rs::maybe_start_match`). Pro ISS Deluxe
+(até 4 via Multitap), testando com só 3 PCs disponíveis, todo mundo dava "Pronto" e nada
+acontecia — silenciosamente esperando um 4º jogador que nunca ia chegar. Sem mensagem de
+erro nem indicação nenhuma na UI do porquê.
+
+**A solução:** `ClientMessage::ForceStart` (novo) — só quem criou a sala (`room.players[0]`)
+pode mandar, só funciona com pelo menos 2 jogadores presentes e todos já prontos. Não muda
+o `max_players` do jogo (continua configurando o Multitap certo no core do RetroArch,
+`write_headless_config`) — só os slots extras ficam sem ninguém controlando. Botão "Iniciar
+mesmo assim (3/4)" aparece em `LobbyScreen.tsx` só pra quem criou a sala, só quando a sala
+não está cheia e todo mundo presente está pronto.
+
+**Depende de:** #007 (é extensão do fluxo de sala) e #011 (é o cenário — Multitap — que
+motivou perceber essa lacuna).
+
+---
+
+## ✅ #016 — Automatiza o contorno da libretro/RetroArch#10424 (Multitap + netplay)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O problema:** testando o ISS Deluxe com 3 PCs reais (força-início do #015), o jogo nem
+mostrava as opções de 3/4 jogadores — mesmo com `input_libretro_device_p2 = "257"` no
+`--appendconfig` de boot do host (o que a gente já fazia desde o #005). Achada a causa:
+issue **aberta desde 2020 e nunca corrigida** no repositório oficial do RetroArch
+([libretro/RetroArch#10424](https://github.com/libretro/RetroArch/issues/10424)) — Multitap
+simplesmente não sincroniza direito com netplay se configurado só na inicialização.
+
+**Confirmado na prática (fora do app, direto por terminal, 3 PCs reais):** o contorno
+documentado pela comunidade do próprio issue funciona — configurar o Multitap pelo Menu
+Rápido → Controles → Porta 2 → Multitap, "Save Game Remap File", **fechar e recarregar o
+conteúdo**, só DEPOIS disso hospedar o netplay. Capturamos o `.rmp` real gerado por esse
+fluxo (`config/remaps/Snes9x/<jogo>.rmp`) pra usar como referência exata de formato.
+
+**Automatizado agora:** `lobby.rs::write_multitap_remap` escreve esse mesmo arquivo `.rmp`
+ANTES do primeiro carregamento do host (não depois, como o fluxo manual) — como o arquivo
+já existe desde o início, não devia precisar do passo de "recarregar" (o recarregamento só
+era necessário porque a config foi aplicada TARDE, via menu, depois do primeiro load; um
+remap pré-existente já é aplicado desde a primeira carga). `write_headless_config` não seta
+mais `input_libretro_device_p2` sozinho (não era suficiente sozinho, confirmado).
+
+**Validado de ponta a ponta (12/08/2026):** testado pelo app de verdade, com os 3 PCs reais
+(servidor + notebook + Windows) — a teoria se confirmou: o arquivo `.rmp` pré-existente
+desde o primeiro carregamento tem o mesmo efeito do "configurar pelo menu + salvar +
+recarregar" manual, sem precisar simular o recarregamento. 3 jogadores humanos controlando
+o ISS Deluxe via Multitap ao mesmo tempo, funcionando.
+
+**Depende de:** #011 (Multitap depende do host headless funcionando) e #015 (força-início,
+necessário pra testar com menos gente que o máximo).
+
+---
+
+## ✅ #017 — Tela "Jogar pela Internet" (acesso fora da LAN, adendo do #006)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O pedido:** tudo validado até aqui foi em LAN — pra jogar com amigos de verdade (casas
+diferentes), o roteador de quem hospeda precisa encaminhar portas pra fora, e a pessoa
+precisa saber pra qual endereço mandar o amigo conectar. Pedido explícito: instruções
+completas e visíveis, nada escondido, e o endereço não pode ficar fixo no código — o
+usuário escolhe o dele.
+
+**O que foi feito:**
+1. **`settings.rs`** — `get/save_public_host_address` (mesmo padrão do `dedicated_server_host`
+   que já existia): endereço público/DDNS digitado pelo usuário, guardado só pra reexibir —
+   a gente não descobre isso sozinho (IP público muda, hostname de DDNS não tem como
+   inferir). `get_local_lan_ip` (novo) — detecta o IP local da máquina via truque de socket
+   UDP "conectado" sem enviar pacote nenhum (kernel escolhe a interface, não precisa de
+   internet de verdade), pra instrução saber pra qual IP apontar a regra do roteador.
+2. **`InternetSettings.tsx`** (novo, botão "🌐 Jogar pela Internet" no header) — as 3 portas
+   que precisam ser liberadas (TCP 7777 lobby, TCP+UDP 55435 netplay) numa tabela, passo a
+   passo de painel de roteador (nome genérico da seção, já que muda por marca), o IP local
+   detectado, campo pro endereço público, e avisos honestos: teste de porta aberta de fora
+   da rede, CGNAT (bem comum no Brasil — quando acontece, port-forward NUNCA funciona,
+   não importa a configuração, só VPN tipo Tailscale resolveria — ainda não implementado),
+   e que só quem hospeda precisa fazer isso (quem só entra como cliente não mexe em nada).
+3. **`LobbyScreen.tsx`** — sala de host agora reexibe o endereço público salvo lado a lado
+   com o código, pronto pra copiar e mandar pro amigo. Sem endereço configurado, mostra um
+   aviso softzinho em vez de simplesmente omitir a informação.
+
+**O que fica de fora, de propósito:** a gente não abre porta sozinho (não dá, é
+configuração do roteador) nem detecta o IP público automaticamente (evita uma chamada de
+rede externa desnecessária, e DDNS não tem como advinhar de jeito nenhum) — o usuário
+sempre digita o que ele mesmo configurou.
+
+**Depende de:** #006 (esta é a primeira fatia implementada dele — falta ainda testar de
+verdade com alguém de fora da rede, e o Plano B de VPN/CGNAT continua não implementado).
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

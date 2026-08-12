@@ -22,7 +22,10 @@ use library::{get_system_configs, list_library, read_cover_image, reindex_librar
 use player_overrides::{get_player_counts, save_player_override};
 use retroarch::{ensure_retroarch_installed, install_retroarch_with_progress, is_retroarch_installed};
 use server::{check_server_online, resolve_lobby_host};
-use settings::{get_dedicated_server_host, save_dedicated_server_host};
+use settings::{
+    get_dedicated_server_host, get_local_lan_ip, get_public_host_address, save_dedicated_server_host,
+    save_public_host_address,
+};
 use systems::list_systems;
 
 fn main() {
@@ -78,6 +81,9 @@ fn main() {
             resolve_lobby_host,
             get_dedicated_server_host,
             save_dedicated_server_host,
+            get_public_host_address,
+            save_public_host_address,
+            get_local_lan_ip,
             write_keyboard_config,
             kill_emulator
         ])

@@ -178,6 +178,20 @@ async fn handle_connection(stream: TcpStream, peer_addr: SocketAddr, rooms: Room
                             message: "Você ainda não está em nenhuma sala".into(),
                         }),
                     },
+                    Ok(ClientMessage::ForceStart) => match &current_room {
+                        Some(code) => match lobby::force_start(&rooms, code, &player_id) {
+                            Ok(start) => {
+                                if let Some((game, max_players)) = start {
+                                    tokio::spawn(lobby::start_match(rooms.clone(), code.clone(), game, max_players));
+                                }
+                                None
+                            }
+                            Err(e) => Some(ServerMessage::Error { message: e }),
+                        },
+                        None => Some(ServerMessage::Error {
+                            message: "Você ainda não está em nenhuma sala".into(),
+                        }),
+                    },
                     Err(e) => Some(ServerMessage::Error {
                         message: format!("mensagem inválida: {e}"),
                     }),
