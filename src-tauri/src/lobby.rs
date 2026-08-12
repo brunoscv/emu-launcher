@@ -120,10 +120,21 @@ fn headless_config_path() -> Result<std::path::PathBuf, String> {
 /// também (bug real encontrado: primeira partida da máquina rodou o host
 /// headless antes de qualquer cliente, e a config "sem vídeo" virou o
 /// padrão pra tudo depois).
+///
+/// `vrr_runloop_enable = "true"` (bug real encontrado 11/08/2026, ver
+/// IDEAS.md #009): sem vídeo real (sem vsync) nem áudio real (o driver
+/// "null" não bloqueia — quem normalmente dá o ritmo do jogo é o buffer de
+/// áudio enchendo em tempo real), o host headless não tinha NENHUM
+/// mecanismo segurando a velocidade e simulava o mais rápido que a CPU
+/// aguentasse — todo mundo conectado via netplay era arrastado nesse
+/// mesmo ritmo acelerado (o jogo "iniciava em fast-forward" pros
+/// clientes). Essa opção ("Sincronizar com a taxa de quadros exata do
+/// conteúdo") força o host a manter o ritmo certo sozinho, sem depender
+/// de vídeo/áudio de verdade.
 fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String> {
     let path = headless_config_path()?;
     let mut contents = String::from(
-        "video_driver = \"null\"\naudio_driver = \"null\"\nconfig_save_on_exit = \"false\"\n",
+        "video_driver = \"null\"\naudio_driver = \"null\"\nconfig_save_on_exit = \"false\"\nvrr_runloop_enable = \"true\"\n",
     );
     if max_players > 2 {
         contents.push_str("input_libretro_device_p2 = \"257\"\n");
