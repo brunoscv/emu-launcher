@@ -1,0 +1,39 @@
+name: Build Windows
+
+# Disparo manual só (aba Actions -> Build Windows -> Run workflow) — não
+# roda em todo push, porque o EMU-001 recebe commit toda hora e não faz
+# sentido gastar minutos de CI num build completo do Windows a cada um.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Instala dependências do frontend
+        run: npm ci
+
+      # Sem --no-bundle aqui de propósito: diferente do nosso uso interno
+      # (testar o binário cru), isso é pra gerar o instalador de verdade
+      # (.msi/.exe via NSIS) pra mandar pra alguém instalar.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publica os instaladores como artefato do workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: emu-launcher-windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
