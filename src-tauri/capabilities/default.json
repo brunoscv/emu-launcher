@@ -4,6 +4,7 @@
   "description": "Permissões padrão da janela principal. Como scan_roms e launch_emulator rodam inteiramente em Rust (não via shell plugin do frontend), não precisamos da permissão 'shell:allow-execute' — mais seguro e mais simples de manter.",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "dialog:default"
   ]
 }

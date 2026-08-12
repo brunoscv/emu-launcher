@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { SystemConfig } from "../types/rom";
 import { KNOWN_SYSTEM_IDS, systemColor, systemLabel } from "./systemMeta";
 
@@ -98,6 +99,20 @@ export function SystemSelector({ onClose, onSaved }: Props) {
           : c
       )
     );
+  }
+
+  async function handleBrowseFolder(systemId: string, currentPath: string | null) {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: currentPath ?? undefined,
+      title: `Pasta de roms — ${systemLabel(systemId)}`,
+    });
+    // `open` devolve null se o usuário cancelar o diálogo — não mexe no
+    // campo nesse caso, só quando escolheu uma pasta de verdade.
+    if (typeof selected === "string") {
+      updateFolder(systemId, selected);
+    }
   }
 
   async function handleSave() {
@@ -207,6 +222,14 @@ export function SystemSelector({ onClose, onSaved }: Props) {
                   value={config.rom_folder ?? ""}
                   onChange={(e) => updateFolder(config.system_id, e.target.value)}
                 />
+
+                <button
+                  type="button"
+                  className="system-selector__browse"
+                  onClick={() => handleBrowseFolder(config.system_id, config.rom_folder)}
+                >
+                  Procurar...
+                </button>
               </div>
             ))}
           </div>
@@ -322,6 +345,17 @@ export function SystemSelector({ onClose, onSaved }: Props) {
           font-family: var(--font-mono);
           font-size: 0.8rem;
           padding: 0.5rem 0.7rem;
+        }
+
+        .system-selector__browse {
+          flex: 0 0 auto;
+          background: transparent;
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          font-size: 0.8rem;
+          padding: 0.5rem 0.8rem;
+          white-space: nowrap;
         }
 
         .system-selector__actions {
