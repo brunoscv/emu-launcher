@@ -133,9 +133,18 @@ fn headless_config_path() -> Result<std::path::PathBuf, String> {
 /// de vídeo/áudio de verdade.
 fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String> {
     let path = headless_config_path()?;
-    let mut contents = String::from(
-        "video_driver = \"null\"\naudio_driver = \"null\"\nconfig_save_on_exit = \"false\"\nvrr_runloop_enable = \"true\"\n",
-    );
+    // TESTE 12/08/2026 (IDEAS.md #009, investigação do bug "nenhuma tecla
+    // funciona"): video/audio "null" desligados de propósito — o
+    // `netplay_request_device_p1` que devolveria o controle pro host
+    // headless pra quem clicou "Host" está falhando de forma consistente
+    // ("[Netplay] Os dispositivos de entrada solicitados não estão
+    // disponíveis", confirmado no log real várias vezes). Rodando o host
+    // com vídeo/áudio de verdade igual ao teste manual por terminal (que
+    // funcionou 100%) pra isolar se o host headless + pedido de device é
+    // que tá quebrando. Reverter (voltar os drivers "null" +
+    // vrr_runloop_enable) depois do teste — servidor dedicado headless de
+    // verdade AINDA precisa disso.
+    let mut contents = String::from("config_save_on_exit = \"false\"\n");
     if max_players > 2 {
         contents.push_str("input_libretro_device_p2 = \"257\"\n");
     }

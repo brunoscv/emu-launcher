@@ -48,8 +48,19 @@ pub fn write_keyboard_config(
     let path = config_path()?;
     let mut contents = String::from("config_save_on_exit = \"false\"\n");
 
-    if let Some(n) = device_number {
-        contents.push_str(&format!("netplay_request_device_p{n} = \"true\"\n"));
+    // TESTE 12/08/2026 (IDEAS.md #009, investigação do bug "nenhuma tecla
+    // funciona" no notebook): log real mostrou "[Netplay] Os dispositivos
+    // de entrada solicitados não estão disponíveis" bem na hora que o
+    // segundo jogador (device_number 2) entra na sala — só o pedido de
+    // device 1 (que precisa "roubar" o slot do host headless) teve
+    // sucesso confirmado. Doc oficial do RetroArch
+    // (docs.libretro.com/guides/netplay-multiple-controllers) diz que,
+    // sem NENHUM Request Device configurado, o cliente que conecta já
+    // vira automaticamente device 2 — só pedir explicitamente device 1
+    // pra ver se a dupla-reivindicação (auto-assign + request explícito)
+    // era o que tava conflitando.
+    if device_number == Some(1) {
+        contents.push_str("netplay_request_device_p1 = \"true\"\n");
     }
 
     for player in &players {
