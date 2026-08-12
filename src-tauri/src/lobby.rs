@@ -131,7 +131,7 @@ fn headless_config_path() -> Result<std::path::PathBuf, String> {
 /// clientes). Essa opção ("Sincronizar com a taxa de quadros exata do
 /// conteúdo") força o host a manter o ritmo certo sozinho, sem depender
 /// de vídeo/áudio de verdade.
-fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String> {
+fn write_headless_config() -> Result<std::path::PathBuf, String> {
     let path = headless_config_path()?;
     // Revertido o contorno do #011 (12/08/2026): o "device request falha"
     // não era bug aleatório do RetroArch — era o próprio HOST headless se
@@ -145,14 +145,59 @@ fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String>
     // conectar, sempre vencia a corrida e ficava com o device 1 pra si
     // (sem ninguém de verdade nele, já que é headless), fazendo o pedido
     // explícito de device 1 de quem clicou "Host" ser recusado sempre.
-    let mut contents = String::from(
+    // Multitap (>2 jogadores) não entra mais aqui — ver `write_multitap_remap`.
+    // Um simples `input_libretro_device_p2` no `--appendconfig` de boot NÃO
+    // é suficiente (testado, IDEAS.md #016): precisa ser um arquivo de
+    // remap por conteúdo, senão o RetroArch não sincroniza os slots extras
+    // direito com o netplay (issue conhecida e nunca corrigida do
+    // RetroArch, libretro/RetroArch#10424).
+    let contents = String::from(
         "video_driver = \"null\"\naudio_driver = \"null\"\nconfig_save_on_exit = \"false\"\nvrr_runloop_enable = \"true\"\nnetplay_start_as_spectator = \"true\"\n",
     );
-    if max_players > 2 {
-        contents.push_str("input_libretro_device_p2 = \"257\"\n");
-    }
     std::fs::write(&path, contents).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+/// Contorna a issue libretro/RetroArch#10424 ("SNES multitap doesn't work
+/// with netplay", aberta desde 2020, sem correção) — confirmado na prática
+/// com 3 PCs reais (IDEAS.md #016) que só funciona configurando o Multitap
+/// pelo Menu Rápido → Controles → Porta 2, salvando "Save Game Remap File"
+/// e RECARREGANDO o conteúdo antes de hospedar. Um `--appendconfig` normal
+/// na subida não é suficiente (testado, falhou); o pulo do gato é o arquivo
+/// de remap por conteúdo — como ele já existe ANTES do primeiro carregamento
+/// aqui, não precisamos simular o "recarregar": o RetroArch aplica o mesmo
+/// jeito que aplicaria numa segunda carga.
+///
+/// Conteúdo do arquivo confirmado copiando literalmente o `.rmp` gerado
+/// pelo próprio RetroArch durante o teste manual (mesmas chaves, mesmos
+/// valores) — não é um formato inventado.
+///
+/// Só SNES por enquanto (única pasta de core confirmada, "Snes9x" — nome de
+/// exibição do core, não o id interno `snes9x_libretro`). Outros sistemas
+/// com Multitap ficam pra quando/se precisar.
+fn write_multitap_remap(game: &RomEntry) -> Result<(), String> {
+    if game.system != "snes" {
+        return Ok(());
+    }
+
+    let installation = retroarch::expected_installation()?;
+    let config_root = std::path::Path::new(&installation.cores_dir)
+        .parent()
+        .ok_or("não consegui achar a pasta de config do RetroArch")?;
+    let remap_dir = config_root.join("config").join("remaps").join("Snes9x");
+    std::fs::create_dir_all(&remap_dir).map_err(|e| e.to_string())?;
+    let remap_path = remap_dir.join(format!("{}.rmp", game.name));
+
+    let contents = "input_libretro_device_p1 = \"1\"\n\
+        input_libretro_device_p2 = \"257\"\n\
+        input_libretro_device_p3 = \"1\"\n\
+        input_libretro_device_p4 = \"1\"\n\
+        input_remap_port_p1 = \"0\"\n\
+        input_remap_port_p2 = \"1\"\n\
+        input_remap_port_p3 = \"2\"\n\
+        input_remap_port_p4 = \"3\"\n";
+
+    std::fs::write(&remap_path, contents).map_err(|e| e.to_string())
 }
 
 /// Baixa/instala o RetroArch se preciso (`ensure_retroarch_installed` —
@@ -176,7 +221,10 @@ async fn launch_host(game: &RomEntry, max_players: i64) -> Result<(u16, Option<u
         .find(|s| s.id == game.system)
         .ok_or_else(|| format!("Nenhum emulador configurado pro sistema \"{}\"", game.system))?;
 
-    let cfg_path = write_headless_config(max_players)?;
+    let cfg_path = write_headless_config()?;
+    if max_players > 2 {
+        write_multitap_remap(game)?;
+    }
 
     let mut args = system_def.extra_args.clone();
     args.push("--host".to_string());
@@ -373,6 +421,41 @@ pub fn set_ready(
 
     broadcast(room);
     Ok(maybe_start_match(room))
+}
+
+/// Começa a partida mesmo incompleta (IDEAS.md #015) — pro caso de não ter
+/// gente suficiente pro máximo que o jogo suporta (ex: ISS Deluxe aceita até
+/// 4 via Multitap, mas só tem 3 PCs disponíveis pra testar agora). Só quem
+/// criou a sala (`room.players[0]`) pode chamar isso, e só com todo mundo
+/// presente já pronto — mesma trava de "ninguém destrava sozinho pros
+/// outros" que o `maybe_start_match` normal já tem. `max_players` do jogo
+/// continua o mesmo na config do host (mantém o Multitap configurado no
+/// core certo, só os slots extras ficam sem ninguém neles).
+pub fn force_start(
+    rooms: &Rooms,
+    code: &str,
+    player_id: &str,
+) -> Result<Option<(RomEntry, i64)>, String> {
+    let mut rooms_guard = rooms.lock().map_err(|_| lock_err())?;
+    let room = rooms_guard
+        .get_mut(code)
+        .ok_or_else(|| format!("Sala \"{code}\" não existe"))?;
+
+    if room.players.first().map(|p| p.id.as_str()) != Some(player_id) {
+        return Err("Só quem criou a sala pode começar mesmo incompleta".to_string());
+    }
+    if room.players.len() < 2 {
+        return Err("Precisa de pelo menos 2 jogadores na sala".to_string());
+    }
+    if !room.players.iter().all(|p| p.ready) {
+        return Err("Ainda tem gente não pronta na sala".to_string());
+    }
+    if room.started {
+        return Ok(None);
+    }
+
+    room.started = true;
+    Ok(Some((room.game.clone(), room.max_players)))
 }
 
 /// Chamado quando a conexão cai. Sala vazia é descartada; sala com gente

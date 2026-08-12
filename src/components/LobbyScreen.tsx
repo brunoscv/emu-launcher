@@ -169,6 +169,10 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     send({ type: "set_ready", ready: !me?.ready });
   }
 
+  function handleForceStart() {
+    send({ type: "force_start" });
+  }
+
   // Volta pro formulário inicial depois de um erro (código errado, IP
   // errado, etc.) sem precisar fechar e reabrir a tela inteira — antes
   // disso a única saída era "Cancelar" e começar tudo de novo.
@@ -284,9 +288,24 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
               <span className="spinner" /> Partida começando, conectando no host...
             </p>
           ) : (
-            <button className="btn-scan" onClick={handleToggleReady}>
-              {me?.ready ? "Cancelar pronto" : "Pronto"}
-            </button>
+            <div className="lobby-screen__actions">
+              <button className="btn-scan" onClick={handleToggleReady}>
+                {me?.ready ? "Cancelar pronto" : "Pronto"}
+              </button>
+
+              {mode === "host" &&
+                roomState.players.length >= 2 &&
+                roomState.players.length < roomState.max_players &&
+                roomState.players.every((p) => p.ready) && (
+                  <button
+                    className="lobby-screen__force-start"
+                    onClick={handleForceStart}
+                    title={`Começa com ${roomState.players.length} de ${roomState.max_players} — os slots extras do Multitap ficam sem ninguém`}
+                  >
+                    Iniciar mesmo assim ({roomState.players.length}/{roomState.max_players})
+                  </button>
+                )}
+            </div>
           )}
 
           <button className="lobby-screen__cancel" onClick={handleClose}>
@@ -362,6 +381,15 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
           display: flex;
           gap: 0.6rem;
           margin-top: 0.4rem;
+        }
+
+        .lobby-screen__force-start {
+          background: transparent;
+          border: 1px solid var(--border-strong);
+          border-radius: var(--radius-sm);
+          color: var(--ink-muted);
+          padding: 0.55rem 1rem;
+          font-size: 0.85rem;
         }
 
         .lobby-screen__status {

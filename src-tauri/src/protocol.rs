@@ -18,6 +18,10 @@ pub enum ClientMessage {
     },
     JoinRoom { code: String, nickname: String },
     SetReady { ready: bool },
+    /// Começa a partida mesmo com menos gente que o máximo do jogo (ex: 3 de
+    /// 4 no Multitap) — só quem criou a sala pode mandar essa mensagem, e só
+    /// funciona com todo mundo presente já pronto (IDEAS.md #015).
+    ForceStart,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

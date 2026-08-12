@@ -890,6 +890,63 @@ grandes, 690×490 sem otimização) — por ora é só teste, sem tratamento de 
 
 ---
 
+## ✅ #015 — "Iniciar mesmo assim" quando a sala não fecha o Multitap
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O problema:** salas só disparam a partida quando ficam CHEIAS
+(`room.players.len() >= room.max_players`, `lobby.rs::maybe_start_match`). Pro ISS Deluxe
+(até 4 via Multitap), testando com só 3 PCs disponíveis, todo mundo dava "Pronto" e nada
+acontecia — silenciosamente esperando um 4º jogador que nunca ia chegar. Sem mensagem de
+erro nem indicação nenhuma na UI do porquê.
+
+**A solução:** `ClientMessage::ForceStart` (novo) — só quem criou a sala (`room.players[0]`)
+pode mandar, só funciona com pelo menos 2 jogadores presentes e todos já prontos. Não muda
+o `max_players` do jogo (continua configurando o Multitap certo no core do RetroArch,
+`write_headless_config`) — só os slots extras ficam sem ninguém controlando. Botão "Iniciar
+mesmo assim (3/4)" aparece em `LobbyScreen.tsx` só pra quem criou a sala, só quando a sala
+não está cheia e todo mundo presente está pronto.
+
+**Depende de:** #007 (é extensão do fluxo de sala) e #011 (é o cenário — Multitap — que
+motivou perceber essa lacuna).
+
+---
+
+## ✅ #016 — Automatiza o contorno da libretro/RetroArch#10424 (Multitap + netplay)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O problema:** testando o ISS Deluxe com 3 PCs reais (força-início do #015), o jogo nem
+mostrava as opções de 3/4 jogadores — mesmo com `input_libretro_device_p2 = "257"` no
+`--appendconfig` de boot do host (o que a gente já fazia desde o #005). Achada a causa:
+issue **aberta desde 2020 e nunca corrigida** no repositório oficial do RetroArch
+([libretro/RetroArch#10424](https://github.com/libretro/RetroArch/issues/10424)) — Multitap
+simplesmente não sincroniza direito com netplay se configurado só na inicialização.
+
+**Confirmado na prática (fora do app, direto por terminal, 3 PCs reais):** o contorno
+documentado pela comunidade do próprio issue funciona — configurar o Multitap pelo Menu
+Rápido → Controles → Porta 2 → Multitap, "Save Game Remap File", **fechar e recarregar o
+conteúdo**, só DEPOIS disso hospedar o netplay. Capturamos o `.rmp` real gerado por esse
+fluxo (`config/remaps/Snes9x/<jogo>.rmp`) pra usar como referência exata de formato.
+
+**Automatizado agora:** `lobby.rs::write_multitap_remap` escreve esse mesmo arquivo `.rmp`
+ANTES do primeiro carregamento do host (não depois, como o fluxo manual) — como o arquivo
+já existe desde o início, não devia precisar do passo de "recarregar" (o recarregamento só
+era necessário porque a config foi aplicada TARDE, via menu, depois do primeiro load; um
+remap pré-existente já é aplicado desde a primeira carga). `write_headless_config` não seta
+mais `input_libretro_device_p2` sozinho (não era suficiente sozinho, confirmado).
+
+**Validado de ponta a ponta (12/08/2026):** testado pelo app de verdade, com os 3 PCs reais
+(servidor + notebook + Windows) — a teoria se confirmou: o arquivo `.rmp` pré-existente
+desde o primeiro carregamento tem o mesmo efeito do "configurar pelo menu + salvar +
+recarregar" manual, sem precisar simular o recarregamento. 3 jogadores humanos controlando
+o ISS Deluxe via Multitap ao mesmo tempo, funcionando.
+
+**Depende de:** #011 (Multitap depende do host headless funcionando) e #015 (força-início,
+necessário pra testar com menos gente que o máximo).
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

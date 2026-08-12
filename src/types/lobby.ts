@@ -10,7 +10,8 @@ export type ClientMessage =
   | { type: "list_games" }
   | { type: "create_room"; game_name: string; game_system: string; nickname: string }
   | { type: "join_room"; code: string; nickname: string }
-  | { type: "set_ready"; ready: boolean };
+  | { type: "set_ready"; ready: boolean }
+  | { type: "force_start" };
 
 export type ServerMessage =
   | { type: "games_list"; games: import("./rom").RomEntry[] }
