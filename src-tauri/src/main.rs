@@ -32,6 +32,19 @@ fn main() {
     // automática só fica indisponível, o override manual continua ok.
     dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../.env")).ok();
 
+    // Ctrl+C (ou kill/fechar terminal) matava só esse processo — o
+    // AppImage do RetroArch se desgruda da sessão do terminal de
+    // propósito (é assim que ele sobrevive o terminal fechar), então
+    // ficava órfão rodando pra sempre, segurando a porta 55435 e
+    // confundindo a próxima rodada de teste (bug real descoberto
+    // 11/08/2026, ver `launcher::kill_all_spawned`). Cobre os dois modos
+    // (desktop e `--server`), já que o registro é global.
+    ctrlc::set_handler(|| {
+        launcher::kill_all_spawned();
+        std::process::exit(0);
+    })
+    .expect("não consegui registrar o handler de Ctrl+C");
+
     // Modo servidor (Fase 5, IDEAS.md #007) — pula o Tauri/GTK inteiramente.
     // O PC dedicado pode não ter monitor nenhum plugado, e o Tauri normal
     // precisa de um display (X11/Wayland) só pra inicializar a janela, mesmo
@@ -65,6 +78,14 @@ fn main() {
             write_keyboard_config,
             kill_emulator
         ])
-        .run(tauri::generate_context!())
-        .expect("erro ao iniciar a aplicação Tauri");
+        .build(tauri::generate_context!())
+        .expect("erro ao iniciar a aplicação Tauri")
+        .run(|_app_handle, event| {
+            // Mesma limpeza do Ctrl+C, mas pro caminho de fechar a janela
+            // normalmente (clicar no X) — os dois precisam matar os
+            // processos órfãos, só disparam de jeitos diferentes.
+            if let tauri::RunEvent::Exit = event {
+                launcher::kill_all_spawned();
+            }
+        });
 }
