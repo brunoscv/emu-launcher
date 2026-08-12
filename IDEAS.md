@@ -1002,6 +1002,52 @@ tiver uma; cancelar o diálogo não mexe no campo.
 
 ---
 
+## ✅ #019 — Editar número de jogadores pela UI (traz de volta o #010)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O pedido:** o `#010` tinha tirado o controle manual da UI de propósito (virou badge
+somente-leitura, corrigir era editar a tabela `game_player_overrides` direto no SQLite).
+Bruno pediu de volta um jeito mais dinâmico — um botão na tela de jogos, editando por
+enquanto só a quantidade máxima de jogadores.
+
+**O que foi feito:**
+1. **`player_overrides.rs::save_player_override`** — não descarta mais valores ≤2 (antes
+   isso "resetava" o override em vez de gravar; sem esse comportamento não dava pra fixar
+   "1 jogador" de propósito num jogo que o IGDB marcou errado como multiplayer). Agora
+   qualquer valor 1+ vira um override explícito de verdade.
+2. **`GameList.tsx`** — o valor "👥 N jogadores" na coluna de metadados ganhou um botão
+   "✏️" do lado; clicar troca pra um input numérico inline (Enter salva, Esc cancela) que
+   chama `save_player_override` e atualiza a lista na hora (`onPlayerCountChanged`, novo
+   prop, disparado pelo `App.tsx::refreshPlayerCounts`).
+
+**Fora do escopo de propósito (pedido do Bruno, "inicialmente"):** editar `uses_multitap`
+separadamente (calculado automático como `max_players > 2` por enquanto) e qualquer outro
+campo de metadata — só número de jogadores por ora.
+
+**Depende de:** #004/#010 (é a mesma tabela/mecanismo, só trouxe UI de volta).
+
+---
+
+## ✅ #020 — Abrir RetroArch avulso pra mapear input pelo menu nativo dele
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O pedido:** receio de habilitar de novo o mapeamento de teclado próprio (#009, já colidiu
+com hotkey global uma vez) — pedido de um jeito de abrir o RetroArch de verdade, sem rom e
+sem nenhuma config nossa, pra configurar input pelo Menu Rápido → Controles dele mesmo,
+gravando direto no `retroarch.cfg` compartilhado.
+
+**Implementado:** `launcher::spawn_emulator` agora aceita `rom_path: Option<&str>` (era
+obrigatório antes) — só bota o argumento da rom na linha de comando quando tem uma de
+verdade. Novo command `open_retroarch` chama `ensure_retroarch_installed` e sobe o
+executável sozinho, sem core, sem rom, sem `--appendconfig` nenhum. Botão "Abrir
+RetroArch" na tela "⌨ Teclado", numa seção nova explicando a alternativa.
+
+**Depende de:** nada bloqueante — é um caminho paralelo ao #009, não substitui.
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

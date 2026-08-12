@@ -238,7 +238,7 @@ async fn launch_host(game: &RomEntry, max_players: i64) -> Result<(u16, Option<u
     // controla. Aparece herdado no mesmo terminal do processo pai.
     args.push("--verbose".to_string());
 
-    let result = launcher::spawn_emulator(&system_def.emulator_path, &game.path, &args, |exit_code| {
+    let result = launcher::spawn_emulator(&system_def.emulator_path, Some(&game.path), &args, |exit_code| {
         println!("RetroArch host encerrou (exit code {exit_code:?})");
     })?;
 

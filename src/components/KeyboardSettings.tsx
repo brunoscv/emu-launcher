@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { KeyboardCalibration } from "../keyboard/KeyboardCalibration";
 import { deleteLayout, getLayout } from "../keyboard/storage";
 
@@ -16,6 +17,20 @@ interface Props {
 export function KeyboardSettings({ onClose }: Props) {
   const [calibratingPlayer, setCalibratingPlayer] = useState<1 | 2 | null>(null);
   const [version, setVersion] = useState(0); // força re-render após salvar/limpar
+  const [openingRetroArch, setOpeningRetroArch] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+
+  async function handleOpenRetroArch() {
+    setOpenError(null);
+    setOpeningRetroArch(true);
+    try {
+      await invoke("open_retroarch");
+    } catch (e) {
+      setOpenError(String(e));
+    } finally {
+      setOpeningRetroArch(false);
+    }
+  }
 
   if (calibratingPlayer !== null) {
     return (
@@ -77,6 +92,27 @@ export function KeyboardSettings({ onClose }: Props) {
         })}
       </div>
 
+      <div className="keyboard-settings__native">
+        <h3>Prefere mapear direto no RetroArch?</h3>
+        <p className="keyboard-settings__hint">
+          Se não quiser confiar no nosso mapeamento (ele já colidiu com hotkeys globais do
+          RetroArch antes — ver "🔑 Hotkeys"), dá pra abrir o RetroArch sozinho, sem rom e
+          sem nenhuma configuração nossa, e configurar pelo Menu Rápido → Controles dele
+          mesmo. Isso grava direto no <code>retroarch.cfg</code> compartilhado, sem passar
+          pelo nosso sistema — mais garantido, só um pouco mais manual.
+        </p>
+        {openError && <div className="keyboard-settings__error">{openError}</div>}
+        <button className="btn-scan" onClick={handleOpenRetroArch} disabled={openingRetroArch}>
+          {openingRetroArch ? (
+            <>
+              <span className="spinner" /> Abrindo...
+            </>
+          ) : (
+            "Abrir RetroArch"
+          )}
+        </button>
+      </div>
+
       <style>{`
         .keyboard-settings {
           flex: 1;
@@ -120,6 +156,37 @@ export function KeyboardSettings({ onClose }: Props) {
           flex-direction: column;
           gap: 0.6rem;
           margin-top: 1rem;
+        }
+
+        .keyboard-settings__native {
+          margin-top: 1.5rem;
+          padding-top: 1.25rem;
+          border-top: 1px solid var(--border-soft);
+          max-width: 560px;
+        }
+
+        .keyboard-settings__native h3 {
+          font-family: var(--font-display);
+          font-size: 0.9rem;
+          color: var(--accent-phosphor);
+          margin: 0 0 0.5rem;
+        }
+
+        .keyboard-settings__native code {
+          font-family: var(--font-mono);
+          background: var(--bg-panel);
+          border-radius: var(--radius-sm);
+          padding: 0.1rem 0.35rem;
+          font-size: 0.85em;
+        }
+
+        .keyboard-settings__error {
+          padding: 0.6rem 0.9rem;
+          background: color-mix(in srgb, var(--danger) 15%, var(--bg-void));
+          color: var(--danger);
+          border-radius: var(--radius-sm);
+          font-size: 0.85rem;
+          margin-bottom: 0.75rem;
         }
 
         .keyboard-settings__row {

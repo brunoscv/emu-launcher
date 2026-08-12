@@ -89,7 +89,7 @@ struct EmulatorClosedPayload {
 /// dentro de um command Tauri quanto de dentro do lock síncrono do lobby.
 pub fn spawn_emulator(
     emulator_path: &str,
-    rom_path: &str,
+    rom_path: Option<&str>,
     extra_args: &[String],
     on_exit: impl FnOnce(Option<i32>) + Send + 'static,
 ) -> Result<LaunchResult, String> {
@@ -101,11 +101,14 @@ pub fn spawn_emulator(
         "[emu-launcher] lançando: {} {} {}",
         emulator_path,
         extra_args.join(" "),
-        rom_path
+        rom_path.unwrap_or("(sem rom — abre no menu do RetroArch)")
     );
 
     let mut cmd = Command::new(emulator_path);
-    cmd.args(extra_args).arg(rom_path);
+    cmd.args(extra_args);
+    if let Some(rom_path) = rom_path {
+        cmd.arg(rom_path);
+    }
     // Grupo de processos próprio (pgid = o próprio pid) — sem isso, matar só
     // o PID que a gente guarda não mata o "AppRun" que o AppImage sobe por
     // baixo (ver kill_pid). `-9 -pid` só funciona se pid for líder de grupo.
@@ -160,7 +163,7 @@ pub async fn launch_emulator(
     extra_args: Vec<String>,
 ) -> Result<LaunchResult, String> {
     let rom_path_for_event = rom_path.clone();
-    spawn_emulator(&emulator_path, &rom_path, &extra_args, move |exit_code| {
+    spawn_emulator(&emulator_path, Some(&rom_path), &extra_args, move |exit_code| {
         let _ = app.emit(
             "emulator-closed",
             EmulatorClosedPayload {
@@ -168,5 +171,21 @@ pub async fn launch_emulator(
                 rom_path: rom_path_for_event,
             },
         );
+    })
+}
+
+/// Abre o RetroArch "pelado" — sem rom, sem core, sem nenhum
+/// `--appendconfig` nosso (nem o mapeamento de teclado do #009, nem o
+/// device request do netplay) — direto no menu principal dele. Pensado pra
+/// configurar input pelo próprio Menu Rápido → Controles do RetroArch,
+/// salvando no `retroarch.cfg` compartilhado de verdade, sem depender do
+/// nosso sistema de remapeamento (que já colidiu com hotkey global uma vez,
+/// ver IDEAS.md #009) — uma saída "eu confio mais no RetroArch mesmo" pra
+/// quem preferir.
+#[tauri::command]
+pub async fn open_retroarch() -> Result<LaunchResult, String> {
+    let installation = crate::retroarch::ensure_retroarch_installed().await?;
+    spawn_emulator(&installation.executable_path, None, &[], |exit_code| {
+        println!("[emu-launcher] RetroArch avulso encerrou (exit code {exit_code:?})");
     })
 }

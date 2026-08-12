@@ -14,6 +14,7 @@ interface Props {
   onConfigureSystems: () => void;
   onHost: (rom: RomEntry) => void;
   onClient: (rom: RomEntry) => void;
+  onPlayerCountChanged: () => void;
 }
 
 function formatSize(bytes: number): string {
@@ -55,9 +56,13 @@ export function GameList({
   onConfigureSystems,
   onHost,
   onClient,
+  onPlayerCountChanged,
 }: Props) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [coverDataUri, setCoverDataUri] = useState<string | null>(null);
+  const [editingPlayers, setEditingPlayers] = useState(false);
+  const [playersDraft, setPlayersDraft] = useState("");
+  const [savingPlayers, setSavingPlayers] = useState(false);
 
   useEffect(() => {
     if (roms.length === 0) {
@@ -73,6 +78,31 @@ export function GameList({
   const selected = roms.find((r) => r.path === selectedPath) ?? null;
   const selectedMaxPlayers = selected ? playerCounts[selected.path] ?? 2 : 2;
   const selectedRunning = selected !== null && selected.path === runningPath;
+
+  // Troca de jogo selecionado cancela edição em andamento — não faz sentido
+  // salvar o valor digitado pro jogo ERRADO se o usuário clicou em outra
+  // linha da lista no meio da edição.
+  useEffect(() => {
+    setEditingPlayers(false);
+  }, [selectedPath]);
+
+  async function handleSavePlayers() {
+    if (!selected) return;
+    const parsed = Number(playersDraft);
+    if (!Number.isInteger(parsed) || parsed < 1) return;
+    setSavingPlayers(true);
+    try {
+      await invoke("save_player_override", {
+        romPath: selected.path,
+        maxPlayers: parsed,
+        usesMultitap: parsed > 2,
+      });
+      onPlayerCountChanged();
+      setEditingPlayers(false);
+    } finally {
+      setSavingPlayers(false);
+    }
+  }
 
   // Sob demanda, um de cada vez — não em lote no list_library (ver
   // read_cover_image em library.rs). Ignora resultado de pedido antigo se o
@@ -148,10 +178,51 @@ export function GameList({
                   </div>
                   <div>
                     <span className="game-list__meta-label">Jogadores</span>
-                    <span className="game-list__meta-value">
-                      👥 {selectedMaxPlayers}
-                      {selectedMaxPlayers > 1 ? " (multiplayer)" : ""}
-                    </span>
+                    {editingPlayers ? (
+                      <div className="game-list__players-edit">
+                        <input
+                          className="game-list__players-input"
+                          type="number"
+                          min={1}
+                          max={8}
+                          autoFocus
+                          value={playersDraft}
+                          onChange={(e) => setPlayersDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSavePlayers();
+                            if (e.key === "Escape") setEditingPlayers(false);
+                          }}
+                        />
+                        <button
+                          className="game-list__players-save"
+                          onClick={handleSavePlayers}
+                          disabled={savingPlayers}
+                        >
+                          {savingPlayers ? "..." : "✓"}
+                        </button>
+                        <button
+                          className="game-list__players-cancel"
+                          onClick={() => setEditingPlayers(false)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="game-list__meta-value">
+                        👥 {selectedMaxPlayers}
+                        {selectedMaxPlayers > 1 ? " (multiplayer)" : ""}
+                        <button
+                          className="game-list__players-editbtn"
+                          onClick={() => {
+                            setPlayersDraft(String(selectedMaxPlayers));
+                            setEditingPlayers(true);
+                          }}
+                          title="Corrigir o número de jogadores desse jogo"
+                        >
+                          ✏️ Editar
+                        </button>
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -356,6 +427,52 @@ export function GameList({
           font-family: var(--font-mono);
           font-size: 0.85rem;
           color: var(--ink-primary);
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        .game-list__players-editbtn {
+          background: transparent;
+          border: 1px solid var(--accent-phosphor);
+          border-radius: var(--radius-sm);
+          color: var(--accent-phosphor);
+          padding: 0.15rem 0.5rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          line-height: 1.6;
+        }
+
+        .game-list__players-editbtn:hover {
+          background: var(--accent-phosphor);
+          color: #fff;
+        }
+
+        .game-list__players-edit {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        .game-list__players-input {
+          width: 3.5rem;
+          background: var(--bg-panel);
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          font-family: var(--font-mono);
+          font-size: 0.85rem;
+          padding: 0.25rem 0.4rem;
+        }
+
+        .game-list__players-save,
+        .game-list__players-cancel {
+          background: transparent;
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          font-size: 0.8rem;
+          padding: 0.2rem 0.5rem;
         }
 
         .game-list__meta-path {
