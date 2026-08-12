@@ -985,6 +985,23 @@ verdade com alguém de fora da rede, e o Plano B de VPN/CGNAT continua não impl
 
 ---
 
+## ✅ #018 — Botão "Procurar..." pra pasta de roms
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O pedido:** o campo de pasta de roms em "⚙ Consoles" só aceitava digitar o caminho à mão
+— pedido de um botão que abre o seletor de pasta nativo do SO e já preenche o campo.
+
+**Implementado:** plugin oficial `tauri-plugin-dialog` (Rust) + `@tauri-apps/plugin-dialog`
+(JS), registrado no `main.rs` e liberado em `capabilities/default.json`
+(`"dialog:default"`). Botão "Procurar..." ao lado de cada input em `SystemSelector.tsx`
+abre o diálogo nativo (`open({ directory: true })`) já na pasta atual configurada, se
+tiver uma; cancelar o diálogo não mexe no campo.
+
+**Depende de:** nada bloqueante.
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra
