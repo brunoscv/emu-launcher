@@ -720,6 +720,42 @@ Cliente na `GameList` que essa ideia esconde/mostra).
 
 ---
 
+## 💡 #011 — Reativar o host headless sem quebrar o `netplay_request_device`
+
+**Registrada em:** 12/08/2026.
+
+**O que aconteceu:** investigando o bug "nenhuma tecla funciona" (host e cliente,
+confirmado com dois PCs reais), depois de descartar o keymap customizado (colisão real com
+`RESERVED_HOTKEYS`, ver #009, mas não era a causa raiz sozinha) e processos RetroArch
+órfãos segurando a porta 55435 (limpeza manual resolveu, mas expôs um gap real: o
+`kill_all_spawned()` do `launcher.rs` só limpa em fechamento gracioso do app — um `AppRun`
+pós-mount FUSE sobreviveu a um restart abrupto e contaminou o teste seguinte), sobrou a
+causa de verdade: **`netplay_request_device_pN` (`keyboard_config.rs`) falha de forma
+consistente pra quem faz o pedido explícito**, enquanto o auto-assign padrão do RetroArch
+(sem pedir nada) sempre funciona. Confirmado repetidas vezes no log real
+(`[Netplay] Os dispositivos de entrada solicitados não estão disponíveis`) — e o lado que
+falha muda dependendo de quem está pedindo explicitamente, nunca de qual `device_number` é.
+
+**Contorno aplicado agora (commit `e878237`):** tirado o host headless do meio.
+`lobby.rs::write_headless_config` não força mais `video_driver`/`audio_driver = "null"` nem
+`vrr_runloop_enable` — quem clica "Host" roda o RetroArch de verdade, com tela, e vira o
+próprio host do netplay (device 1 por padrão, sem pedir nada). `LobbyScreen.tsx` não spawna
+mais um segundo processo `--connect` pro próprio host se conectar nele mesmo. Cliente
+conecta normal, sem `netplay_request_device_p2`. Testado de ponta a ponta com dois PCs
+reais, funcionou — mas isso **desfaz o #005** (servidor dedicado sem tela).
+
+**O que falta pra reverter certo:** descobrir por que o pedido explícito de device falha
+(suspeitas não confirmadas: timing/ordem de conexão quando o solicitante é o primeiro a
+conectar; alguma flag adicional que falta junto do `netplay_request_device_pN`; ou
+limitação real da 1.22.2) e só então voltar os drivers "null" + o request explícito do
+device 1, sem reintroduzir o bug. Só então dá pra ter host headless (PC dedicado, #005/#007)
+E múltiplos jogadores humanos ao mesmo tempo funcionando de novo.
+
+**Depende de:** #005 (é o que fica quebrado até isso ser resolvido) e #009 (mecanismo do
+`netplay_request_device` que está falhando).
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra
