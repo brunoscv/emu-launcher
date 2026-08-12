@@ -26,7 +26,9 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("setup");
   const [nickname, setNickname] = useState("Jogador");
   const [joinCode, setJoinCode] = useState("");
-  const [hostOverride, setHostOverride] = useState("");
+  // TEMPORÁRIO (12/08/2026): IP fixo do PC servidor pra não ficar digitando
+  // em todo teste — tirar quando não for mais só esses dois PCs testando.
+  const [hostOverride, setHostOverride] = useState("192.168.100.108");
   const [resolvedHost, setResolvedHost] = useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
 
@@ -55,13 +57,19 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
   // acharia por padrão (servidor dedicado, se configurado e online) — o
   // jogador ainda pode sobrescrever com o IP de quem tá hospedando, caso o
   // host tenha caído no modo embutido local (sem servidor dedicado).
-  useEffect(() => {
-    if (mode === "client") {
-      invoke<string>("resolve_lobby_host")
-        .then(setHostOverride)
-        .catch(() => {});
-    }
-  }, [mode]);
+  //
+  // DESLIGADO TEMPORARIAMENTE (12/08/2026): sem servidor dedicado online,
+  // `resolve_lobby_host` sempre cai no fallback `127.0.0.1` (endereço da
+  // PRÓPRIA máquina cliente, sem sentido nenhum pro notebook, que está
+  // conectando em outra máquina) — isso sobrescrevia o IP fixo logo que a
+  // tela abria. Reativar junto quando o campo de IP deixar de ser fixo.
+  // useEffect(() => {
+  //   if (mode === "client") {
+  //     invoke<string>("resolve_lobby_host")
+  //       .then(setHostOverride)
+  //       .catch(() => {});
+  //   }
+  // }, [mode]);
 
   async function handleStart() {
     setSetupError(null);
@@ -172,6 +180,18 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     send({ type: "set_ready", ready: !me?.ready });
   }
 
+  // Volta pro formulário inicial depois de um erro (código errado, IP
+  // errado, etc.) sem precisar fechar e reabrir a tela inteira — antes
+  // disso a única saída era "Cancelar" e começar tudo de novo.
+  function handleRetry() {
+    disconnect();
+    setSetupError(null);
+    setRoomState(null);
+    setMyPlayerId(null);
+    startedRef.current = false;
+    setPhase("setup");
+  }
+
   function handleClose() {
     // Mata o RetroArch local que essa sala disparou (se ainda tiver algum)
     // — senão fica um processo órfão rodando, causando exatamente a
@@ -195,7 +215,14 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
       </h2>
 
       {(error || setupError || launchError) && (
-        <div className="lobby-screen__error">{error ?? setupError ?? launchError}</div>
+        <div className="lobby-screen__error">
+          {error ?? setupError ?? launchError}
+          {(error || setupError) && phase !== "setup" && (
+            <button className="lobby-screen__error-retry" onClick={handleRetry}>
+              Voltar
+            </button>
+          )}
+        </div>
       )}
 
       {phase === "setup" && (
@@ -219,7 +246,7 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
                 className="lobby-screen__input"
                 placeholder="Código da sala"
                 value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value)}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               />
             </>
           )}
@@ -303,11 +330,26 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
         }
 
         .lobby-screen__error {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
           padding: 0.6rem 0.9rem;
           background: color-mix(in srgb, var(--danger) 15%, var(--bg-void));
           color: var(--danger);
           border-radius: var(--radius-sm);
           font-size: 0.85rem;
+        }
+
+        .lobby-screen__error-retry {
+          flex-shrink: 0;
+          background: transparent;
+          border: 1px solid var(--danger);
+          color: var(--danger);
+          border-radius: var(--radius-sm);
+          padding: 0.3rem 0.7rem;
+          font-size: 0.8rem;
+          cursor: pointer;
         }
 
         .lobby-screen__setup {
