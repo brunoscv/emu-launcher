@@ -107,17 +107,6 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     setLaunchError(null);
     setLaunching(true);
     try {
-      // TESTE 12/08/2026 (IDEAS.md #009): quem clicou "Host" agora É o
-      // processo real que o backend já lançou (`launch_host`/`lobby.rs`,
-      // sem drivers "null" nesse teste) — não faz sentido essa mesma
-      // pessoa também abrir um segundo RetroArch tentando se conectar
-      // nela mesma. Reverter junto com `write_headless_config` quando
-      // voltar o host headless de verdade.
-      if (mode === "host") {
-        setLaunching(false);
-        return;
-      }
-
       const systemDef = (await invoke<SystemDefinition[]>("list_systems")).find((s) => s.id === system);
       if (!systemDef) {
         throw new Error(`Nenhum emulador configurado localmente pro sistema "${system}"`);

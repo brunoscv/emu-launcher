@@ -720,7 +720,7 @@ Cliente na `GameList` que essa ideia esconde/mostra).
 
 ---
 
-## 💡 #011 — Reativar o host headless sem quebrar o `netplay_request_device`
+## ✅ #011 — Reativar o host headless sem quebrar o `netplay_request_device`
 
 **Registrada em:** 12/08/2026.
 
@@ -744,15 +744,50 @@ mais um segundo processo `--connect` pro próprio host se conectar nele mesmo. C
 conecta normal, sem `netplay_request_device_p2`. Testado de ponta a ponta com dois PCs
 reais, funcionou — mas isso **desfaz o #005** (servidor dedicado sem tela).
 
-**O que falta pra reverter certo:** descobrir por que o pedido explícito de device falha
-(suspeitas não confirmadas: timing/ordem de conexão quando o solicitante é o primeiro a
-conectar; alguma flag adicional que falta junto do `netplay_request_device_pN`; ou
-limitação real da 1.22.2) e só então voltar os drivers "null" + o request explícito do
-device 1, sem reintroduzir o bug. Só então dá pra ter host headless (PC dedicado, #005/#007)
-E múltiplos jogadores humanos ao mesmo tempo funcionando de novo.
+### Causa raiz de verdade (encontrada 12/08/2026, lendo o código-fonte oficial do RetroArch)
 
-**Depende de:** #005 (é o que fica quebrado até isso ser resolvido) e #009 (mecanismo do
-`netplay_request_device` que está falhando).
+Duas causas reais, não uma:
+
+1. **O próprio host headless se auto-declarava "jogador".** `netplay_frontend.c` (função
+   `netplay_cmd_mode`) mostra que TODO participante do netplay — servidor incluso — vira
+   "player" automaticamente na subida a menos que `netplay_start_as_spectator = "true"`
+   esteja no `.cfg`. Sem essa flag, o host headless caía no mesmo "auto-assign, pega a
+   primeira porta livre" que os clientes sem pedido usam — e como ele sobe ANTES de
+   qualquer cliente conectar, sempre vencia a corrida e ficava com o device 1 pra si (sem
+   ninguém de verdade nele). Quando o jogador que clicou "Host" pedia explicitamente o
+   device 1 de volta, o servidor via a porta já ocupada (por ele mesmo) e recusava —
+   sempre, de forma 100% determinística, não um bug aleatório.
+2. **Processos órfãos** (já registrados acima) contaminavam portas de testes anteriores,
+   fazendo a recusa parecer ainda mais aleatória.
+
+`netplay_handle_play_spectate` confirma que a recusa (`MSG_NETPLAY_CANNOT_PLAY_NOT_AVAILABLE`,
+a mensagem em PT-BR "dispositivos de entrada solicitados não estão disponíveis") só acontece
+quando a porta pedida JÁ está de fato ocupada — o mecanismo em si sempre funcionou como
+documentado, mas o `netplay_start_as_spectator` sequer ligou pra fazer o host desistir da
+porta.
+
+### Correção final (revertido o contorno acima)
+
+- `lobby.rs::write_headless_config` — volta `video_driver`/`audio_driver = "null"` +
+  `vrr_runloop_enable`, e adiciona `netplay_start_as_spectator = "true"` (a peça que
+  faltava).
+- `keyboard_config.rs::write_keyboard_config` — volta a mandar `netplay_request_device_pN`
+  pra TODO `device_number`, não só 1.
+- `LobbyScreen.tsx` — quem clica "Host" volta a lançar seu próprio processo `--connect`
+  (controla device 1 de novo, já que o host headless não fica mais com ele).
+- `launcher.rs` — bônus de robustez pro processo órfão: `spawn_emulator` agora bota cada
+  processo no próprio grupo (`process_group(0)`) e `kill_pid` mata o grupo inteiro
+  (`-9 -pid`, `/T` no Windows), não só o PID isolado — fecha de vez o "AppRun" que
+  escapava do `pkill`/`kill_all_spawned` antes.
+
+**Pegadinha real descoberta ao validar:** as duas máquinas (servidor + notebook) precisam
+rodar EXATAMENTE o mesmo código de negociação de device — se uma ficar atrasada (não deu
+`git pull`+rebuild), ela pode auto-assignar a porta 1 pra si antes da outra conseguir pedir
+explicitamente, e a que pediu certo fica sem dispositivo nenhum. Sintoma: um lado controla
+os menus normalmente, o outro não responde a nada.
+
+**Depende de:** #005 (estava quebrado até isso ser resolvido, agora funciona de novo) e
+#009 (mecanismo do `netplay_request_device`, confirmado funcionando).
 
 ---
 

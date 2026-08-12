@@ -11,12 +11,24 @@ use tokio::process::Command;
 /// processo em modo fire-and-forget (só monitora a saída numa task), então
 /// matar por PID via comando do SO é mais simples que replumbing pra
 /// guardar o `Child` em algum lugar acessível depois.
+///
+/// Mata o GRUPO de processos inteiro (`-pid` no Unix, `/T` no Windows), não
+/// só o PID isolado — bug real encontrado 11-12/08/2026 (IDEAS.md #011): o
+/// AppImage do RetroArch faz um segundo processo por baixo (mount FUSE, via
+/// fork, não exec-replace) chamado "AppRun"; matando só o PID que
+/// `spawn_emulator` guarda (o processo pai/wrapper) esse "AppRun" sobrevivia
+/// órfão, segurando a porta 55435 pra sempre e contaminando o teste
+/// seguinte com "porta já em uso"/"device já ocupado". `spawn_emulator`
+/// (abaixo) já bota o processo no seu próprio grupo (`process_group(0)`)
+/// pra isso funcionar.
 pub fn kill_pid(pid: u32) -> Result<(), String> {
     #[cfg(unix)]
-    let result = std::process::Command::new("kill").args(["-9", &pid.to_string()]).output();
+    let result = std::process::Command::new("kill")
+        .args(["-9", &format!("-{pid}")])
+        .output();
     #[cfg(windows)]
     let result = std::process::Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
+        .args(["/F", "/T", "/PID", &pid.to_string()])
         .output();
 
     result.map(|_| ()).map_err(|e| e.to_string())
@@ -92,9 +104,14 @@ pub fn spawn_emulator(
         rom_path
     );
 
-    let mut child = Command::new(emulator_path)
-        .args(extra_args)
-        .arg(rom_path)
+    let mut cmd = Command::new(emulator_path);
+    cmd.args(extra_args).arg(rom_path);
+    // Grupo de processos próprio (pgid = o próprio pid) — sem isso, matar só
+    // o PID que a gente guarda não mata o "AppRun" que o AppImage sobe por
+    // baixo (ver kill_pid). `-9 -pid` só funciona se pid for líder de grupo.
+    #[cfg(unix)]
+    cmd.process_group(0);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Falha ao iniciar o emulador '{}': {}", emulator_path, e))?;
 

@@ -133,18 +133,21 @@ fn headless_config_path() -> Result<std::path::PathBuf, String> {
 /// de vídeo/áudio de verdade.
 fn write_headless_config(max_players: i64) -> Result<std::path::PathBuf, String> {
     let path = headless_config_path()?;
-    // TESTE 12/08/2026 (IDEAS.md #009, investigação do bug "nenhuma tecla
-    // funciona"): video/audio "null" desligados de propósito — o
-    // `netplay_request_device_p1` que devolveria o controle pro host
-    // headless pra quem clicou "Host" está falhando de forma consistente
-    // ("[Netplay] Os dispositivos de entrada solicitados não estão
-    // disponíveis", confirmado no log real várias vezes). Rodando o host
-    // com vídeo/áudio de verdade igual ao teste manual por terminal (que
-    // funcionou 100%) pra isolar se o host headless + pedido de device é
-    // que tá quebrando. Reverter (voltar os drivers "null" +
-    // vrr_runloop_enable) depois do teste — servidor dedicado headless de
-    // verdade AINDA precisa disso.
-    let mut contents = String::from("config_save_on_exit = \"false\"\n");
+    // Revertido o contorno do #011 (12/08/2026): o "device request falha"
+    // não era bug aleatório do RetroArch — era o próprio HOST headless se
+    // auto-declarando "jogador" na subida (comportamento padrão do
+    // RetroArch pra todo mundo, servidor incluso, a menos que
+    // `netplay_start_as_spectator` esteja ligado — confirmado lendo
+    // netplay_frontend.c::netplay_cmd_mode/netplay_handle_play_spectate no
+    // código-fonte oficial). Sem essa flag, o host caía no mesmo
+    // "auto-assign, pega a primeira porta livre" que os clientes usam sem
+    // pedido explícito — e como ele sobe ANTES de qualquer cliente
+    // conectar, sempre vencia a corrida e ficava com o device 1 pra si
+    // (sem ninguém de verdade nele, já que é headless), fazendo o pedido
+    // explícito de device 1 de quem clicou "Host" ser recusado sempre.
+    let mut contents = String::from(
+        "video_driver = \"null\"\naudio_driver = \"null\"\nconfig_save_on_exit = \"false\"\nvrr_runloop_enable = \"true\"\nnetplay_start_as_spectator = \"true\"\n",
+    );
     if max_players > 2 {
         contents.push_str("input_libretro_device_p2 = \"257\"\n");
     }
