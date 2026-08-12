@@ -8,10 +8,10 @@ pub struct PlayerCount {
     pub max_players: i64,
 }
 
-/// Valor efetivo por jogo pra UI mostrar: override manual (IDEAS.md #010 —
-/// não tem mais controle na UI pra isso, mas a tabela continua sendo o jeito
-/// de corrigir na mão direto no SQLite quando o IGDB erra) vence; senão usa
-/// o resultado automático do IGDB (`enrich_player_counts`); um jogo já
+/// Valor efetivo por jogo pra UI mostrar: override manual (botão "✏️ Editar"
+/// na `GameList`, IDEAS.md #019 trouxe de volta o controle que o #010 tinha
+/// tirado) vence; senão usa o resultado automático do IGDB
+/// (`enrich_player_counts`); um jogo já
 /// verificado que o IGDB não achou multiplayer nenhum vira `1` (esconde
 /// Host/Cliente — ver `GameList.tsx`). Jogo nunca verificado (sem linha em
 /// nenhuma das duas tabelas) fica de fora do resultado — quem chama assume
@@ -41,20 +41,16 @@ pub fn get_player_counts() -> Result<Vec<PlayerCount>, String> {
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
-/// `max_players <= 2` remove o override (2 é o padrão assumido pra quem não
-/// tem linha na tabela — não precisa gravar o caso comum).
+/// Grava o override explícito, qualquer valor (1 em diante) — IDEAS.md #019
+/// trouxe de volta uma UI pra isso (botão "✏️ Editar" na `GameList`), então
+/// precisa suportar corrigir tanto "pra cima" (IGDB errou pra menos) quanto
+/// "pra baixo" (ex: forçar 1 jogador num jogo que o IGDB marcou errado como
+/// multiplayer). Antes disso só existia o caminho de "pra cima" (valores
+/// ≤2 eram descartados, assumindo que 2 já era o padrão razoável) — não
+/// dava pra fixar "1 jogador" de propósito por aqui.
 #[tauri::command]
 pub fn save_player_override(rom_path: String, max_players: i64, uses_multitap: bool) -> Result<(), String> {
     let conn = db::connect()?;
-
-    if max_players <= 2 {
-        conn.execute(
-            "DELETE FROM game_player_overrides WHERE rom_path = ?1",
-            params![rom_path],
-        )
-        .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
 
     conn.execute(
         "INSERT INTO game_player_overrides (rom_path, max_players, uses_multitap)

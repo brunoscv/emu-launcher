@@ -348,6 +348,7 @@ export default function App() {
               onConfigureSystems={() => setShowSettings(true)}
               onHost={(rom) => setLobby({ mode: "host", game: rom })}
               onClient={(rom) => setLobby({ mode: "client", game: rom })}
+              onPlayerCountChanged={refreshPlayerCounts}
             />
           </main>
 

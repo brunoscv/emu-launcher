@@ -17,7 +17,7 @@ mod systems;
 
 use igdb::enrich_player_counts;
 use keyboard_config::write_keyboard_config;
-use launcher::{kill_emulator, launch_emulator};
+use launcher::{kill_emulator, launch_emulator, open_retroarch};
 use library::{get_system_configs, list_library, read_cover_image, reindex_library, save_system_configs};
 use player_overrides::{get_player_counts, save_player_override};
 use retroarch::{ensure_retroarch_installed, install_retroarch_with_progress, is_retroarch_installed};
@@ -86,7 +86,8 @@ fn main() {
             save_public_host_address,
             get_local_lan_ip,
             write_keyboard_config,
-            kill_emulator
+            kill_emulator,
+            open_retroarch
         ])
         .build(tauri::generate_context!())
         .expect("erro ao iniciar a aplicação Tauri")
