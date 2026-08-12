@@ -20,7 +20,7 @@ use keyboard_config::write_keyboard_config;
 use launcher::{kill_emulator, launch_emulator};
 use library::{get_system_configs, list_library, reindex_library, save_system_configs};
 use player_overrides::{get_player_counts, save_player_override};
-use retroarch::ensure_retroarch_installed;
+use retroarch::{ensure_retroarch_installed, install_retroarch_with_progress, is_retroarch_installed};
 use server::{check_server_online, resolve_lobby_host};
 use settings::{get_dedicated_server_host, save_dedicated_server_host};
 use systems::list_systems;
@@ -68,6 +68,8 @@ fn main() {
             reindex_library,
             list_library,
             ensure_retroarch_installed,
+            is_retroarch_installed,
+            install_retroarch_with_progress,
             get_player_counts,
             save_player_override,
             enrich_player_counts,

@@ -756,6 +756,36 @@ E múltiplos jogadores humanos ao mesmo tempo funcionando de novo.
 
 ---
 
+## ✅ #012 — Status e download do RetroArch pela tela de configurar consoles
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O problema:** `ensure_retroarch_installed` (download de ~450MB, RetroArch + todos os
+cores num pacote só) sempre rodou silencioso, disparado só na hora de "Jogar"/"Host" — pro
+usuário, clicar num jogo e a tela travar por minutos sem explicação parecia bug, não
+download em andamento.
+
+**A solução:** `SystemSelector.tsx` ("Configurar consoles") agora mostra logo no topo um
+indicador único "Emulador (RetroArch): ✅ instalado" ou "⬇ não instalado" (é um instalador
+só, compartilhado por todos os consoles — não tem checagem por console, seria enganoso já
+que SNES/NES/PSX vêm todos no mesmo pacote). Se não estiver instalado, botão "Baixar agora"
+dispara o download com barra de progresso (fases: baixando RetroArch → extraindo → baixando
+cores → extraindo → pronto), via evento `retroarch-install-progress` emitido do Rust.
+
+**Plano técnico (implementado):**
+1. `retroarch.rs` — `is_retroarch_installed()` (novo, só confere se o executável existe,
+   sem baixar nada) e `install_retroarch_with_progress(app: AppHandle)` (novo, mesma lógica
+   de `ensure_retroarch_installed` mas emitindo progresso) — os dois compartilham a mesma
+   função interna (`ensure_installed_inner`), só muda se tem `AppHandle` pra emitir evento
+   ou não. `ensure_retroarch_installed` (sem progresso) continua existindo do jeito que
+   sempre foi, é a rede de segurança chamada antes de "Jogar"/Host/Cliente.
+2. `SystemSelector.tsx` — checa o status ao abrir a tela, escuta o evento de progresso,
+   desenha a barra.
+
+**Depende de:** #003 (é a mesma instalação gerenciada, só com uma UI melhor em cima).
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

@@ -1,7 +1,21 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { SystemConfig } from "../types/rom";
 import { KNOWN_SYSTEM_IDS, systemColor, systemLabel } from "./systemMeta";
+
+interface InstallProgress {
+  phase: string;
+  downloaded_bytes: number;
+  total_bytes: number | null;
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  retroarch: "Baixando o RetroArch...",
+  "retroarch-extraindo": "Extraindo o RetroArch...",
+  cores: "Baixando os cores (SNES/NES/PSX)...",
+  "cores-extraindo": "Extraindo os cores...",
+};
 
 interface Props {
   onClose: () => void;
@@ -36,13 +50,45 @@ export function SystemSelector({ onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [retroarchInstalled, setRetroarchInstalled] = useState<boolean | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+
   useEffect(() => {
     invoke<SystemConfig[]>("get_system_configs")
       .then((loaded) => setConfigs(withDefaults(loaded)))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
     invoke<string | null>("get_dedicated_server_host").then((host) => setDedicatedServer(host ?? ""));
+    invoke<boolean>("is_retroarch_installed").then(setRetroarchInstalled);
   }, []);
+
+  useEffect(() => {
+    const unlistenPromise = listen<InstallProgress>("retroarch-install-progress", (event) => {
+      setInstallProgress(event.payload);
+    });
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, []);
+
+  // IDEAS.md #012: antes disso, o download de ~450MB do RetroArch + cores
+  // só acontecia silenciosamente no primeiro "Jogar"/"Host" — o usuário
+  // clicava e via 10 minutos de nada acontecendo, sem saber o motivo.
+  // Agora dá pra baixar aqui, com barra de progresso, antes de precisar
+  // jogar de verdade.
+  async function handleInstallRetroarch() {
+    setInstallError(null);
+    setInstallProgress({ phase: "retroarch", downloaded_bytes: 0, total_bytes: null });
+    try {
+      await invoke("install_retroarch_with_progress");
+      setRetroarchInstalled(true);
+    } catch (e) {
+      setInstallError(String(e));
+    } finally {
+      setInstallProgress(null);
+    }
+  }
 
   function updateFolder(systemId: string, romFolder: string) {
     setConfigs((prev) =>
@@ -83,6 +129,62 @@ export function SystemSelector({ onClose, onSaved }: Props) {
         <p className="system-selector__hint">Carregando...</p>
       ) : (
         <>
+          <div className="system-selector__emulator">
+            <div className="system-selector__emulator-status">
+              <span className="system-selector__server-label">Emulador (RetroArch)</span>
+              {retroarchInstalled === null ? (
+                <span className="system-selector__hint">verificando...</span>
+              ) : retroarchInstalled ? (
+                <span className="system-selector__badge system-selector__badge--ok">
+                  ✅ instalado
+                </span>
+              ) : (
+                <span className="system-selector__badge system-selector__badge--missing">
+                  ⬇ não instalado
+                </span>
+              )}
+            </div>
+
+            {installError && <div className="system-selector__error">{installError}</div>}
+
+            {installProgress ? (
+              <div className="system-selector__progress">
+                <p className="system-selector__hint">
+                  {PHASE_LABEL[installProgress.phase] ?? "Instalando..."}
+                  {installProgress.total_bytes
+                    ? ` (${Math.round(
+                        (installProgress.downloaded_bytes / installProgress.total_bytes) * 100
+                      )}%)`
+                    : ""}
+                </p>
+                <div className="system-selector__progress-track">
+                  <div
+                    className="system-selector__progress-fill"
+                    style={{
+                      width: installProgress.total_bytes
+                        ? `${Math.min(
+                            100,
+                            (installProgress.downloaded_bytes / installProgress.total_bytes) * 100
+                          )}%`
+                        : "100%",
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              retroarchInstalled === false && (
+                <button className="btn-scan" onClick={handleInstallRetroarch}>
+                  Baixar agora (~450MB)
+                </button>
+              )
+            )}
+
+            <p className="system-selector__hint">
+              Um instalador só, compartilhado por todos os consoles (SNES/NES/PSX) — não
+              precisa baixar de novo pra cada um.
+            </p>
+          </div>
+
           <p className="system-selector__hint">
             Preencha a pasta de roms dos consoles que você quer emular. Deixe em branco
             os que não usa — sem pasta, o console fica de fora da biblioteca.
@@ -224,6 +326,55 @@ export function SystemSelector({ onClose, onSaved }: Props) {
 
         .system-selector__actions {
           margin-top: 1.25rem;
+        }
+
+        .system-selector__emulator {
+          margin-bottom: 1.25rem;
+          padding-bottom: 1.25rem;
+          border-bottom: 1px solid var(--border-soft);
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .system-selector__emulator-status {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+
+        .system-selector__badge {
+          font-size: 0.8rem;
+          font-weight: 600;
+          padding: 0.15rem 0.55rem;
+          border-radius: var(--radius-sm);
+        }
+
+        .system-selector__badge--ok {
+          color: var(--accent-teal);
+        }
+
+        .system-selector__badge--missing {
+          color: var(--ink-muted);
+        }
+
+        .system-selector__progress {
+          display: flex;
+          flex-direction: column;
+          gap: 0.35rem;
+        }
+
+        .system-selector__progress-track {
+          height: 6px;
+          border-radius: 999px;
+          background: var(--bg-panel);
+          overflow: hidden;
+        }
+
+        .system-selector__progress-fill {
+          height: 100%;
+          background: var(--accent-teal);
+          transition: width 0.2s ease;
         }
 
         .system-selector__server {

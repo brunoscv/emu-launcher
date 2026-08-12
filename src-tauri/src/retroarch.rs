@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::Emitter;
 use tokio::io::AsyncWriteExt;
 
 /// Versão fixa pra todo mundo (Bruno + amigos) — netplay do RetroArch exige
@@ -80,11 +81,38 @@ pub fn expected_installation() -> Result<RetroArchInstallation, String> {
     })
 }
 
+/// Confere se a instalação gerenciada já existe, sem baixar nada — pra
+/// UI (`SystemSelector.tsx`) mostrar "instalado"/"não instalado" na hora
+/// sem disparar um download de ~450MB só pra checar.
+#[tauri::command]
+pub fn is_retroarch_installed() -> Result<bool, String> {
+    let platform = platform_info()?;
+    let root = install_root()?;
+    Ok(root.join(&platform.executable_rel).exists())
+}
+
 /// Baixa e extrai o RetroArch + cores gerenciados pelo app, se ainda não
 /// existirem na versão fixa. Idempotente — se o executável já existe, só
-/// devolve os caminhos sem baixar nada de novo.
+/// devolve os caminhos sem baixar nada de novo. Variante "silenciosa" (sem
+/// `AppHandle`) usada internamente antes de lançar um jogo (`App.tsx`,
+/// `LobbyScreen.tsx`) e por `lobby.rs` no modo `--server` — nesses casos o
+/// download já devia ter acontecido antes pela tela de configurar
+/// consoles; isso aqui só é a rede de segurança.
 #[tauri::command]
 pub async fn ensure_retroarch_installed() -> Result<RetroArchInstallation, String> {
+    ensure_installed_inner(None).await
+}
+
+/// Mesma instalação, mas emitindo eventos `retroarch-install-progress` pro
+/// `SystemSelector.tsx` desenhar uma barra de progresso — usada pelo botão
+/// "Baixar agora" (IDEAS.md #012), pra não pegar o usuário de surpresa com
+/// 10 minutos de espera silenciosa no primeiro "Jogar".
+#[tauri::command]
+pub async fn install_retroarch_with_progress(app: tauri::AppHandle) -> Result<RetroArchInstallation, String> {
+    ensure_installed_inner(Some(&app)).await
+}
+
+async fn ensure_installed_inner(app: Option<&tauri::AppHandle>) -> Result<RetroArchInstallation, String> {
     let platform = platform_info()?;
     let root = install_root()?;
     let executable_path = root.join(&platform.executable_rel);
@@ -96,8 +124,8 @@ pub async fn ensure_retroarch_installed() -> Result<RetroArchInstallation, Strin
             RETROARCH_VERSION, platform.os_segment, platform.arch_segment
         );
 
-        download_and_extract(&format!("{base_url}RetroArch.7z"), &root).await?;
-        download_and_extract(&format!("{base_url}RetroArch_cores.7z"), &root).await?;
+        download_and_extract(&format!("{base_url}RetroArch.7z"), &root, app, "retroarch").await?;
+        download_and_extract(&format!("{base_url}RetroArch_cores.7z"), &root, app, "cores").await?;
 
         #[cfg(unix)]
         {
@@ -117,6 +145,14 @@ pub async fn ensure_retroarch_installed() -> Result<RetroArchInstallation, Strin
         ));
     }
 
+    if let Some(app) = app {
+        let _ = app.emit("retroarch-install-progress", InstallProgress {
+            phase: "concluído".to_string(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+        });
+    }
+
     Ok(RetroArchInstallation {
         version: RETROARCH_VERSION.to_string(),
         executable_path: executable_path.to_string_lossy().to_string(),
@@ -124,20 +160,56 @@ pub async fn ensure_retroarch_installed() -> Result<RetroArchInstallation, Strin
     })
 }
 
-async fn download_and_extract(url: &str, dest: &Path) -> Result<(), String> {
+/// Payload do evento `retroarch-install-progress` — `phase` é
+/// "retroarch"/"cores" (baixando), "retroarch-extraindo"/"cores-extraindo"
+/// (sem progresso granular no 7z, só indica que trocou de etapa) ou
+/// "concluído".
+#[derive(Debug, Serialize, Clone)]
+struct InstallProgress {
+    phase: String,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+}
+
+async fn download_and_extract(
+    url: &str,
+    dest: &Path,
+    app: Option<&tauri::AppHandle>,
+    phase: &str,
+) -> Result<(), String> {
     let response = reqwest::get(url).await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("HTTP {} ao baixar {}", response.status(), url));
     }
+    let total_bytes = response.content_length();
 
     let tmp_path = dest.join("_download.7z");
     {
         let mut file = tokio::fs::File::create(&tmp_path).await.map_err(|e| e.to_string())?;
         let mut stream = response.bytes_stream();
+        let mut downloaded_bytes: u64 = 0;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| e.to_string())?;
+            downloaded_bytes += chunk.len() as u64;
+            if let Some(app) = app {
+                let _ = app.emit("retroarch-install-progress", InstallProgress {
+                    phase: phase.to_string(),
+                    downloaded_bytes,
+                    total_bytes,
+                });
+            }
             file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         }
+    }
+
+    if let Some(app) = app {
+        // 7z não dá progresso granular de extração — só avisa que trocou
+        // de etapa, pra UI não parecer travada nos ~segundos que isso leva.
+        let _ = app.emit("retroarch-install-progress", InstallProgress {
+            phase: format!("{phase}-extraindo"),
+            downloaded_bytes: 0,
+            total_bytes: None,
+        });
     }
 
     let dest_owned = dest.to_path_buf();
