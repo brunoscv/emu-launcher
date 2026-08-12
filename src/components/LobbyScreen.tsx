@@ -112,18 +112,24 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
       }
 
       const keyboardArgs = await buildKeyboardAppendConfigArgs(deviceNumber);
+      const extraArgs = [
+        ...systemDef.extra_args,
+        "--connect",
+        resolvedHost ?? "127.0.0.1",
+        "--port",
+        String(hostPort),
+        ...keyboardArgs,
+        "--verbose",
+      ];
+      // Log de investigação (IDEAS.md #009, bug dos controles) — visível
+      // no devtools do webview (botão direito -> Inspecionar), mostra
+      // exatamente o device_number que o servidor mandou pra essa máquina.
+      console.log("[LobbyScreen] match_starting", { deviceNumber, hostPort, extraArgs });
       await invoke("ensure_retroarch_installed");
       const result = await invoke<LaunchResult>("launch_emulator", {
         emulatorPath: systemDef.emulator_path,
         romPath: localRom.path,
-        extraArgs: [
-          ...systemDef.extra_args,
-          "--connect",
-          resolvedHost ?? "127.0.0.1",
-          "--port",
-          String(hostPort),
-          ...keyboardArgs,
-        ],
+        extraArgs,
       });
       emulatorPidRef.current = result.pid;
     } catch (e) {

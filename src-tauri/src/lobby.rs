@@ -161,6 +161,11 @@ async fn launch_host(game: &RomEntry, max_players: i64) -> Result<(u16, Option<u
     args.push(NETPLAY_PORT.to_string());
     args.push("--appendconfig".to_string());
     args.push(cfg_path.to_string_lossy().to_string());
+    // --verbose: log de investigação (IDEAS.md #009, bug dos controles) —
+    // faz o próprio RetroArch imprimir os logs de netplay/input dele
+    // (join de jogador, request device, etc.), não só o que a gente
+    // controla. Aparece herdado no mesmo terminal do processo pai.
+    args.push("--verbose".to_string());
 
     let result = launcher::spawn_emulator(&system_def.emulator_path, &game.path, &args, |exit_code| {
         println!("RetroArch host encerrou (exit code {exit_code:?})");
@@ -205,6 +210,10 @@ pub async fn start_match(rooms: Rooms, code: String, game: RomEntry, max_players
     match result {
         Ok((host_port, host_pid)) => {
             room.host_pid = host_pid;
+            println!(
+                "[lobby] sala {code}: host no ar (pid={host_pid:?}, porta {host_port}) — atribuindo device_number pra {} jogador(es)",
+                room.players.len()
+            );
             // Mensagem individual, não broadcast — cada jogador recebe um
             // device_number diferente (posição na sala + 1). O host do
             // RetroArch é sempre headless (sem ninguém sentado nele) — ao
@@ -214,11 +223,16 @@ pub async fn start_match(rooms: Rooms, code: String, game: RomEntry, max_players
             // devices 1..max_players direto, sem desperdiçar nenhuma porta
             // controlável com ninguém nela.
             for (index, player) in room.players.iter().enumerate() {
+                let device_number = (index + 1) as u8;
+                println!(
+                    "[lobby] sala {code}: {} ({}) -> device_number {device_number}",
+                    player.nickname, player.id
+                );
                 let message = ServerMessage::MatchStarting {
                     host_port,
                     system: game.system.clone(),
                     game_name: game.name.clone(),
-                    device_number: (index + 1) as u8,
+                    device_number,
                 };
                 let text = serde_json::to_string(&message).unwrap_or_default();
                 let _ = player.tx.send(Message::text(text));

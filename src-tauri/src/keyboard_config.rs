@@ -61,6 +61,7 @@ pub fn write_keyboard_config(
         }
     }
 
+    println!("[keyboard_config] escrevendo {} com:\n{contents}", path.display());
     std::fs::write(&path, contents).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
 }

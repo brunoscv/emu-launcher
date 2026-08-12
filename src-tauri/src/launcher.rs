@@ -52,6 +52,17 @@ pub fn spawn_emulator(
     extra_args: &[String],
     on_exit: impl FnOnce(Option<i32>) + Send + 'static,
 ) -> Result<LaunchResult, String> {
+    // Log de investigação (IDEAS.md #009, bug dos controles) — `Command`
+    // herda o stdio do processo pai por padrão, então isso (e a saída do
+    // próprio RetroArch, se `--verbose` estiver nos args) aparece direto
+    // no terminal de quem rodou `npm run tauri dev` ou o binário release.
+    println!(
+        "[emu-launcher] lançando: {} {} {}",
+        emulator_path,
+        extra_args.join(" "),
+        rom_path
+    );
+
     let mut child = Command::new(emulator_path)
         .args(extra_args)
         .arg(rom_path)
@@ -59,10 +70,13 @@ pub fn spawn_emulator(
         .map_err(|e| format!("Falha ao iniciar o emulador '{}': {}", emulator_path, e))?;
 
     let pid = child.id();
+    println!("[emu-launcher] processo iniciado, pid={pid:?}");
 
     tokio::spawn(async move {
         let status = child.wait().await;
-        on_exit(status.ok().and_then(|s| s.code()));
+        let exit_code = status.ok().and_then(|s| s.code());
+        println!("[emu-launcher] processo pid={pid:?} encerrou (exit code {exit_code:?})");
+        on_exit(exit_code);
     });
 
     Ok(LaunchResult {
