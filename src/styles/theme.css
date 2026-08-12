@@ -1,20 +1,24 @@
 @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  /* Paleta — preto quente (plástico de videogame antigo), não sci-fi frio */
-  --bg-void: #17140f;
-  --bg-shelf: #211c15;
-  --bg-panel: #2a241b;
-  --border-soft: rgba(243, 237, 224, 0.09);
-  --border-strong: rgba(243, 237, 224, 0.18);
+  /* Paleta "identidade retro" (12/08/2026, revisão #013) — preto neutro
+     estilo Batocera/EmulationStation, não mais o preto quente/âmbar
+     original. --accent-phosphor manteve o NOME (usado em vários
+     componentes) mas virou vermelho — trocar o nome exigiria mexer em
+     todo arquivo que referencia a variável, sem ganho real. */
+  --bg-void: #0c0c0e;
+  --bg-shelf: #131316;
+  --bg-panel: #1b1b1f;
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-  --accent-phosphor: #ffb000; /* âmbar de CRT — acento primário */
-  --accent-phosphor-dim: #8a5f00;
+  --accent-phosphor: #e0313c; /* vermelho retro — acento primário */
+  --accent-phosphor-dim: #7a1a20;
   --accent-teal: #4fd1c5; /* secundário, uso comedido (netplay/online) */
 
-  --ink-primary: #f3ede0;
-  --ink-muted: #948a78;
-  --ink-faint: #5f5748;
+  --ink-primary: #f2f2f2;
+  --ink-muted: #94949a;
+  --ink-faint: #58585e;
 
   --danger: #e0654f;
 
@@ -85,7 +89,7 @@ body {
   background: var(--bg-void);
   background-image: radial-gradient(
     ellipse at top,
-    rgba(255, 176, 0, 0.05),
+    rgba(224, 49, 60, 0.06),
     transparent 60%
   );
   color: var(--ink-primary);

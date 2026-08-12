@@ -8,6 +8,7 @@ export interface RomEntry {
   extension: string;
   system: string;
   size_bytes: number;
+  cover_path: string | null;
 }
 
 export interface SystemDefinition {
@@ -26,6 +27,21 @@ export interface SystemConfig {
 export interface ReindexResult {
   roms: RomEntry[];
   warnings: string[];
+}
+
+export interface PlayerCount {
+  rom_path: string;
+  max_players: number;
+}
+
+export interface EnrichProgress {
+  checked: number;
+  total: number;
+}
+
+export interface EnrichResult {
+  checked: number;
+  found: number;
 }
 
 export interface LaunchResult {

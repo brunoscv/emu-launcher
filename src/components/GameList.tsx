@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { RomEntry } from "../types/rom";
 import { systemColor, systemLabel } from "./systemMeta";
 
@@ -7,8 +9,11 @@ interface Props {
   error: string | null;
   loading: boolean;
   hasEnabledSystems: boolean;
+  playerCounts: Record<string, number>;
   onPlay: (rom: RomEntry) => void;
   onConfigureSystems: () => void;
+  onHost: (rom: RomEntry) => void;
+  onClient: (rom: RomEntry) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -26,12 +31,18 @@ function initialsOf(name: string): string {
 }
 
 /**
- * Lista estilo biblioteca Steam. Trocada da "prateleira de cartuchos" original
- * por ser MUITO mais leve de renderizar: sem box-shadow com blur, sem
- * gradiente, sem transform em hover — só cor sólida e background-color no
- * hover, que WebKitGTK sem aceleração gráfica de verdade renderiza sem
- * esforço. A cor por sistema continua (fundo sólido da capa), só perdeu o
- * gradiente diagonal que tinha antes.
+ * Lista + detalhe em 3 colunas (revisão #013, identidade "retro" — lista de
+ * nomes / metadados / capa+ações), inspirada em frontends estilo Batocera.
+ * Trocada da versão "lista estilo Steam" de linha única por pedido do
+ * Bruno — ver aviso no CLAUDE.md/IDEAS.md sobre isso reintroduzir o tipo de
+ * peso visual (sombra, transform) que o `GameDetailPanel.tsx` deprecado
+ * tinha: aqui o transform/sombra só existe no item SELECIONADO da lista
+ * (nunca em todos ao mesmo tempo, nem em hover de linha), o que é bem mais
+ * barato de repintar.
+ *
+ * Sem metadata real de jogo (desenvolvedora/ano/nota) — só o que o app
+ * realmente sabe: sistema, tamanho do arquivo e nº de jogadores (IGDB). Não
+ * inventa campo nenhum.
  */
 export function GameList({
   roms,
@@ -39,9 +50,48 @@ export function GameList({
   error,
   loading,
   hasEnabledSystems,
+  playerCounts,
   onPlay,
   onConfigureSystems,
+  onHost,
+  onClient,
 }: Props) {
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [coverDataUri, setCoverDataUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (roms.length === 0) {
+      setSelectedPath(null);
+      return;
+    }
+    if (!roms.some((r) => r.path === selectedPath)) {
+      setSelectedPath(roms[0].path);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roms]);
+
+  const selected = roms.find((r) => r.path === selectedPath) ?? null;
+  const selectedMaxPlayers = selected ? playerCounts[selected.path] ?? 2 : 2;
+  const selectedRunning = selected !== null && selected.path === runningPath;
+
+  // Sob demanda, um de cada vez — não em lote no list_library (ver
+  // read_cover_image em library.rs). Ignora resultado de pedido antigo se o
+  // jogo selecionado já mudou de novo enquanto a leitura ainda rodava.
+  useEffect(() => {
+    let cancelled = false;
+    setCoverDataUri(null);
+    if (selected?.cover_path) {
+      invoke<string>("read_cover_image", { path: selected.cover_path })
+        .then((uri) => {
+          if (!cancelled) setCoverDataUri(uri);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.cover_path]);
+
   return (
     <div className="game-list-wrap">
       {error && <div className="game-list__error">{error}</div>}
@@ -55,8 +105,8 @@ export function GameList({
         <div className="game-list__status">
           {hasEnabledSystems ? (
             <>
-              <p className="game-list__status-title">Nenhum jogo encontrado</p>
-              <p>Clique em "Reindexar biblioteca" pra escanear as pastas configuradas.</p>
+              <p className="game-list__status-title">0 jogos</p>
+              <p>Nenhum jogo encontrado — clique em "Reindexar biblioteca" pra escanear as pastas configuradas.</p>
             </>
           ) : (
             <>
@@ -69,42 +119,96 @@ export function GameList({
           )}
         </div>
       ) : (
-        <div className="game-list" role="list">
-          {roms.map((rom) => {
-            const tint = systemColor(rom.system);
-            const isRunning = rom.path === runningPath;
-            return (
+        <div className="game-list">
+          <section className="game-list__column game-list__names" role="list">
+            {roms.map((rom) => (
               <div
                 key={rom.path}
                 role="listitem"
-                className="game-row"
-                data-running={isRunning}
+                className="game-list__name-row"
+                data-selected={rom.path === selectedPath}
+                data-running={rom.path === runningPath}
+                onClick={() => setSelectedPath(rom.path)}
               >
-                <div className="game-row__cover" style={{ background: tint }}>
-                  <span className="game-row__initials">{initialsOf(rom.name)}</span>
-                </div>
-
-                <div className="game-row__info">
-                  <p className="game-row__title">{rom.name}</p>
-                  <p className="game-row__meta">
-                    {systemLabel(rom.system)} · {formatSize(rom.size_bytes)}
-                  </p>
-                </div>
-
-                {isRunning ? (
-                  <span className="game-row__running">Rodando...</span>
-                ) : (
-                  <button
-                    className="game-row__play"
-                    onClick={() => onPlay(rom)}
-                    disabled={runningPath !== null}
-                  >
-                    ▶ Jogar
-                  </button>
-                )}
+                {rom.name}
               </div>
-            );
-          })}
+            ))}
+          </section>
+
+          <section className="game-list__column game-list__meta">
+            {selected ? (
+              <>
+                <h2 className="game-list__meta-title">{selected.name}</h2>
+                <p className="game-list__meta-system">{systemLabel(selected.system)}</p>
+
+                <div className="game-list__meta-grid">
+                  <div>
+                    <span className="game-list__meta-label">Tamanho</span>
+                    <span className="game-list__meta-value">{formatSize(selected.size_bytes)}</span>
+                  </div>
+                  <div>
+                    <span className="game-list__meta-label">Jogadores</span>
+                    <span className="game-list__meta-value">
+                      👥 {selectedMaxPlayers}
+                      {selectedMaxPlayers > 1 ? " (multiplayer)" : ""}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="game-list__meta-path">{selected.path}</p>
+              </>
+            ) : (
+              <p className="game-list__meta-empty">Selecione um jogo na lista.</p>
+            )}
+          </section>
+
+          <section className="game-list__column game-list__cover-col">
+            {selected && (
+              <>
+                <div className="game-list__cover" style={{ background: systemColor(selected.system) }}>
+                  {coverDataUri ? (
+                    <img className="game-list__cover-img" src={coverDataUri} alt="" />
+                  ) : (
+                    <span>{initialsOf(selected.name)}</span>
+                  )}
+                </div>
+
+                {selectedRunning ? (
+                  <p className="game-list__running">Rodando...</p>
+                ) : (
+                  <div className="game-list__cover-actions">
+                    <button
+                      className="game-list__play"
+                      onClick={() => onPlay(selected)}
+                      disabled={runningPath !== null}
+                    >
+                      ▶ Jogar
+                    </button>
+                    {selectedMaxPlayers > 1 && (
+                      <div className="game-list__multiplayer-actions">
+                        <button
+                          className="game-list__multiplayer"
+                          onClick={() => onHost(selected)}
+                          disabled={runningPath !== null}
+                          title="Hospedar uma partida multiplayer desse jogo"
+                        >
+                          Host
+                        </button>
+                        <button
+                          className="game-list__multiplayer"
+                          onClick={() => onClient(selected)}
+                          disabled={runningPath !== null}
+                          title="Entrar numa partida multiplayer desse jogo"
+                        >
+                          Cliente
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
         </div>
       )}
 
@@ -145,89 +249,199 @@ export function GameList({
 
         .game-list {
           flex: 1;
+          min-height: 0;
+          display: grid;
+          grid-template-columns: 1.1fr 1fr 0.85fr;
+          gap: 1rem;
+          padding: 1rem 1.5rem;
+          overflow: hidden;
+        }
+
+        .game-list__column {
+          background: var(--bg-shelf);
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-md);
+          overflow: hidden;
+        }
+
+        .game-list__names {
+          overflow-y: auto;
+          padding: 0.5rem;
+        }
+
+        .game-list__name-row {
+          padding: 0.6rem 0.85rem;
+          border-radius: var(--radius-sm);
+          font-size: 0.85rem;
+          font-weight: 500;
+          color: var(--ink-muted);
+          cursor: pointer;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          /* transform só no item selecionado — nunca em todos os itens,
+             é isso que mantém isso barato numa lista de centenas de linhas */
+          transition: transform var(--transition-fast);
+        }
+
+        .game-list__name-row:hover {
+          background: var(--bg-panel);
+          color: var(--ink-primary);
+        }
+
+        .game-list__name-row[data-selected="true"] {
+          background: var(--accent-phosphor);
+          color: #fff;
+          font-weight: 700;
+          transform: translateX(4px);
+        }
+
+        .game-list__name-row[data-running="true"] {
+          outline: 1px solid var(--accent-teal);
+        }
+
+        .game-list__meta {
+          padding: 1.25rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
           overflow-y: auto;
         }
 
-        .game-row {
-          display: flex;
-          align-items: center;
-          gap: 1rem;
-          padding: 0.65rem 1.5rem;
-          border-bottom: 1px solid var(--border-soft);
+        .game-list__meta-empty {
+          color: var(--ink-muted);
+          font-size: 0.85rem;
         }
 
-        /* Só troca de cor de fundo — sem transição, sem custo de repaint extra */
-        .game-row:hover {
+        .game-list__meta-title {
+          font-family: var(--font-display);
+          font-size: 1.15rem;
+          color: var(--accent-phosphor);
+          margin: 0;
+          line-height: 1.3;
+        }
+
+        .game-list__meta-system {
+          margin: 0;
+          font-size: 0.8rem;
+          color: var(--ink-muted);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .game-list__meta-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 0.75rem;
           background: var(--bg-panel);
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          padding: 0.75rem;
         }
 
-        .game-row[data-running="true"] {
-          background: color-mix(in srgb, var(--accent-teal) 10%, var(--bg-void));
+        .game-list__meta-grid > div {
+          display: flex;
+          flex-direction: column;
+          gap: 0.15rem;
         }
 
-        .game-row__cover {
-          flex: 0 0 auto;
-          width: 56px;
-          height: 74px; /* proporção 3:4, formato de box art */
+        .game-list__meta-label {
+          font-size: 0.7rem;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--ink-faint);
+        }
+
+        .game-list__meta-value {
+          font-family: var(--font-mono);
+          font-size: 0.85rem;
+          color: var(--ink-primary);
+        }
+
+        .game-list__meta-path {
+          font-family: var(--font-mono);
+          font-size: 0.7rem;
+          color: var(--ink-faint);
+          word-break: break-all;
+          margin: 0;
+        }
+
+        .game-list__cover-col {
+          padding: 1.25rem;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 1rem;
+        }
+
+        .game-list__cover {
+          width: 100%;
+          /* capas do Bruno vêm 690x490 (~4:3 horizontal) — bate com isso, não
+             mais o 3:4 vertical de capa de caixa de jogo */
+          aspect-ratio: 690 / 490;
           border-radius: var(--radius-sm);
           display: flex;
           align-items: center;
           justify-content: center;
+          overflow: hidden;
         }
 
-        .game-row__initials {
+        .game-list__cover-img {
+          width: 100%;
+          height: 100%;
+          /* contain, não cover — garante a foto inteira visível mesmo se
+             algum arquivo vier fora dessa proporção exata */
+          object-fit: contain;
+        }
+
+        .game-list__cover span {
           font-family: var(--font-display);
-          font-size: 1.1rem;
+          font-size: 2rem;
           color: rgba(255, 255, 255, 0.9);
         }
 
-        .game-row__info {
-          flex: 1;
-          min-width: 0; /* permite o ellipsis funcionar dentro do flex */
+        .game-list__cover-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          width: 100%;
         }
 
-        .game-row__title {
-          margin: 0;
-          font-weight: 600;
-          font-size: 0.95rem;
-          color: var(--ink-primary);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .game-row__meta {
-          margin: 0.15rem 0 0;
-          font-family: var(--font-mono);
-          font-size: 0.75rem;
-          color: var(--ink-muted);
-        }
-
-        .game-row__play {
-          flex: 0 0 auto;
+        .game-list__play {
           background: var(--accent-phosphor);
-          color: var(--bg-void);
+          color: #fff;
           border: none;
           border-radius: var(--radius-sm);
-          padding: 0.5rem 0.9rem;
-          font-weight: 600;
-          font-size: 0.85rem;
-          opacity: 0;
+          padding: 0.65rem;
+          font-weight: 700;
+          font-size: 0.9rem;
         }
 
-        /* aparece no hover da linha inteira, não só do botão */
-        .game-row:hover .game-row__play {
-          opacity: 1;
+        .game-list__multiplayer-actions {
+          display: flex;
+          gap: 0.5rem;
         }
 
-        .game-row__play:disabled {
+        .game-list__multiplayer {
+          flex: 1;
+          background: transparent;
+          border: 1px solid var(--border-strong);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          padding: 0.5rem;
+          font-size: 0.8rem;
+        }
+
+        .game-list__play:disabled,
+        .game-list__multiplayer:disabled {
+          opacity: 0.6;
           cursor: not-allowed;
         }
 
-        .game-row__running {
-          flex: 0 0 auto;
+        .game-list__running {
           font-family: var(--font-mono);
-          font-size: 0.8rem;
+          font-size: 0.85rem;
           color: var(--accent-teal);
         }
       `}</style>

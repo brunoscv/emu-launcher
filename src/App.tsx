@@ -6,13 +6,21 @@ import type {
   SystemDefinition,
   SystemConfig,
   ReindexResult,
+  PlayerCount,
+  EnrichProgress,
+  EnrichResult,
   EmulatorClosedPayload,
 } from "./types/rom";
-import { SystemTabs } from "./components/SystemTabs";
+import { ConsoleCarousel } from "./components/ConsoleCarousel";
 import { GameList } from "./components/GameList";
+import { KNOWN_SYSTEM_IDS, systemLabel } from "./components/systemMeta";
 import { SystemSelector } from "./components/SystemSelector";
 import { AlphabetTabs, letterGroupOf } from "./components/AlphabetTabs";
 import { Pagination } from "./components/Pagination";
+import { LobbyScreen } from "./components/LobbyScreen";
+import { KeyboardSettings } from "./components/KeyboardSettings";
+import { HotkeysScreen } from "./components/HotkeysScreen";
+import { buildKeyboardAppendConfigArgs } from "./keyboard/appendConfig";
 import "./styles/theme.css";
 
 const PAGE_SIZE = 50;
@@ -29,6 +37,39 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showKeyboardSettings, setShowKeyboardSettings] = useState(false);
+  const [showHotkeys, setShowHotkeys] = useState(false);
+  const [lobby, setLobby] = useState<{ mode: "host" | "client"; game: RomEntry } | null>(null);
+  const [installingRetroArch, setInstallingRetroArch] = useState(false);
+  const [playerCounts, setPlayerCounts] = useState<Record<string, number>>({});
+  const [enriching, setEnriching] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
+
+  function refreshPlayerCounts() {
+    invoke<PlayerCount[]>("get_player_counts").then((counts) => {
+      const byPath: Record<string, number> = {};
+      for (const c of counts) byPath[c.rom_path] = c.max_players;
+      setPlayerCounts(byPath);
+    });
+  }
+
+  async function handleEnrichPlayerCounts() {
+    setError(null);
+    setEnriching(true);
+    setEnrichProgress(null);
+    try {
+      const result = await invoke<EnrichResult>("enrich_player_counts");
+      refreshPlayerCounts();
+      setError(
+        `IGDB: ${result.checked} jogo(s) verificado(s), ${result.found} com dado de multiplayer.`
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setEnriching(false);
+      setEnrichProgress(null);
+    }
+  }
 
   const hasEnabledSystems = useMemo(
     () => systemConfigs.some((c) => c.enabled),
@@ -40,18 +81,46 @@ export default function App() {
   }
 
   useEffect(() => {
-    invoke<SystemDefinition[]>("list_systems").then(setSystems);
+    invoke<SystemDefinition[]>("list_systems")
+      .then(setSystems)
+      .catch((e) => setError(String(e)));
     invoke<RomEntry[]>("list_library").then(setRoms);
     refreshSystemConfigs();
+    refreshPlayerCounts();
 
-    const unlisten = listen<EmulatorClosedPayload>("emulator-closed", () => {
+    const unlistenClosed = listen<EmulatorClosedPayload>("emulator-closed", () => {
       setRunningRom(null);
+    });
+    const unlistenProgress = listen<EnrichProgress>("player-count-progress", (event) => {
+      setEnrichProgress(event.payload);
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenClosed.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
     };
   }, []);
+
+  // Esc volta pro carrossel — mesma ideia do "B Voltar" de frontend estilo
+  // Batocera, só que com uma tecla que a gente realmente escuta (não finge
+  // suporte a botão de controle que ainda não está plugado, ver
+  // gamepad/GamepadManager.ts — módulo pronto mas não integrado no App.tsx).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (
+        e.key === "Escape" &&
+        activeSystem !== null &&
+        !showSettings &&
+        !showKeyboardSettings &&
+        !showHotkeys &&
+        !lobby
+      ) {
+        setActiveSystem(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeSystem, showSettings, showKeyboardSettings, showHotkeys, lobby]);
 
   const systemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -60,8 +129,6 @@ export default function App() {
     }
     return counts;
   }, [roms]);
-
-  const availableSystems = useMemo(() => Object.keys(systemCounts).sort(), [systemCounts]);
 
   const visibleRoms = useMemo(() => {
     if (!activeSystem) return roms;
@@ -133,14 +200,23 @@ export default function App() {
     setError(null);
     setRunningRom(rom.path);
     try {
+      // Sem custo nas próximas vezes (checa se já existe antes de baixar) —
+      // só demora de verdade na primeira partida de cada máquina.
+      setInstallingRetroArch(true);
+      await invoke("ensure_retroarch_installed");
+      setInstallingRetroArch(false);
+
+      const keyboardArgs = await buildKeyboardAppendConfigArgs();
       await invoke("launch_emulator", {
         emulatorPath: system.emulator_path,
         romPath: rom.path,
-        extraArgs: system.extra_args,
+        extraArgs: [...system.extra_args, ...keyboardArgs],
       });
     } catch (e) {
       setError(String(e));
       setRunningRom(null);
+    } finally {
+      setInstallingRetroArch(false);
     }
   }
 
@@ -149,11 +225,14 @@ export default function App() {
       <header className="app-header">
         <h1 className="app-header__title">Emu Launcher</h1>
         <div className="app-header__scan">
-          <button
-            className="btn-scan"
-            onClick={() => setShowSettings((v) => !v)}
-          >
+          <button className="btn-scan" onClick={() => setShowSettings((v) => !v)}>
             {showSettings ? "Fechar configurações" : "⚙ Consoles"}
+          </button>
+          <button className="btn-scan" onClick={() => setShowKeyboardSettings((v) => !v)}>
+            {showKeyboardSettings ? "Fechar teclado" : "⌨ Teclado"}
+          </button>
+          <button className="btn-scan" onClick={() => setShowHotkeys((v) => !v)}>
+            {showHotkeys ? "Fechar hotkeys" : "🔑 Hotkeys"}
           </button>
           <button className="btn-scan" onClick={handleReindex} disabled={reindexing}>
             {reindexing ? (
@@ -164,8 +243,31 @@ export default function App() {
               "Reindexar biblioteca"
             )}
           </button>
+          <button className="btn-scan" onClick={handleEnrichPlayerCounts} disabled={enriching}>
+            {enriching ? (
+              <>
+                <span className="spinner" /> Buscando no IGDB...
+              </>
+            ) : (
+              "👥 Buscar jogadores (IGDB)"
+            )}
+          </button>
         </div>
       </header>
+
+      {installingRetroArch && (
+        <div className="retroarch-banner">
+          <span className="spinner" /> Preparando o RetroArch (só demora na primeira vez
+          nesta máquina)...
+        </div>
+      )}
+
+      {enriching && enrichProgress && (
+        <div className="retroarch-banner">
+          <span className="spinner" /> Verificando jogadores no IGDB: {enrichProgress.checked} de{" "}
+          {enrichProgress.total}...
+        </div>
+      )}
 
       {showSettings ? (
         <main className="app-main">
@@ -177,14 +279,34 @@ export default function App() {
             }}
           />
         </main>
+      ) : showKeyboardSettings ? (
+        <main className="app-main">
+          <KeyboardSettings onClose={() => setShowKeyboardSettings(false)} />
+        </main>
+      ) : showHotkeys ? (
+        <main className="app-main">
+          <HotkeysScreen onClose={() => setShowHotkeys(false)} />
+        </main>
+      ) : lobby ? (
+        <main className="app-main">
+          <LobbyScreen mode={lobby.mode} game={lobby.game} onClose={() => setLobby(null)} />
+        </main>
+      ) : activeSystem === null ? (
+        <main className="app-main">
+          <ConsoleCarousel
+            systemIds={KNOWN_SYSTEM_IDS}
+            counts={systemCounts}
+            onSelect={setActiveSystem}
+          />
+        </main>
       ) : (
         <>
-          <SystemTabs
-            systems={availableSystems}
-            counts={systemCounts}
-            active={activeSystem}
-            onSelect={(s) => setActiveSystem(s === activeSystem ? null : s)}
-          />
+          <div className="active-system-bar">
+            <button className="active-system-bar__back" onClick={() => setActiveSystem(null)}>
+              ← Consoles (Esc)
+            </button>
+            <span className="active-system-bar__label">{systemLabel(activeSystem)}</span>
+          </div>
 
           <div className="search-row">
             <input
@@ -212,12 +334,24 @@ export default function App() {
               error={error}
               loading={reindexing}
               hasEnabledSystems={hasEnabledSystems}
+              playerCounts={playerCounts}
               onPlay={handlePlay}
               onConfigureSystems={() => setShowSettings(true)}
+              onHost={(rom) => setLobby({ mode: "host", game: rom })}
+              onClient={(rom) => setLobby({ mode: "client", game: rom })}
             />
           </main>
 
           <Pagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+
+          <footer className="game-footer">
+            <span className="game-footer__key">
+              <span className="game-footer__key-badge">Esc</span> Voltar
+            </span>
+            <span className="game-footer__key">
+              <span className="game-footer__key-badge">▶</span> Jogar
+            </span>
+          </footer>
         </>
       )}
 
@@ -257,7 +391,7 @@ export default function App() {
           gap: 0.5rem;
           padding: 0.55rem 1rem;
           background: var(--accent-phosphor);
-          color: var(--bg-void);
+          color: #fff;
           border: none;
           border-radius: var(--radius-sm);
           font-weight: 600;
@@ -273,6 +407,74 @@ export default function App() {
           flex: 1;
           display: flex;
           overflow: hidden;
+        }
+
+        .retroarch-banner {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          padding: 0.6rem 1.5rem;
+          background: color-mix(in srgb, var(--accent-phosphor) 15%, var(--bg-void));
+          color: var(--ink-primary);
+          font-size: 0.85rem;
+          border-bottom: 1px solid var(--border-soft);
+        }
+
+        .active-system-bar {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.75rem 1.5rem;
+          border-bottom: 1px solid var(--border-soft);
+        }
+
+        .active-system-bar__back {
+          background: transparent;
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          padding: 0.4rem 0.8rem;
+          font-size: 0.85rem;
+          cursor: pointer;
+        }
+
+        .active-system-bar__label {
+          font-family: var(--font-display);
+          font-size: 0.95rem;
+          color: var(--accent-phosphor);
+        }
+
+        .game-footer {
+          display: flex;
+          justify-content: center;
+          gap: 1.5rem;
+          padding: 0.65rem;
+          border-top: 1px solid var(--border-soft);
+        }
+
+        .game-footer__key {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--ink-muted);
+        }
+
+        .game-footer__key-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 1.4rem;
+          height: 1.4rem;
+          padding: 0 0.3rem;
+          border-radius: 999px;
+          background: var(--bg-panel);
+          border: 1px solid var(--border-strong);
+          color: var(--ink-primary);
+          font-size: 0.7rem;
         }
 
         .search-row {
