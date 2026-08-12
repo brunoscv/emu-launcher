@@ -23,6 +23,7 @@ dotenvy = "0.15"
 tokio-tungstenite = "0.24"
 rand = "0.8"
 ctrlc = "3"
+base64 = "0.22"
 
 # Descomente quando chegar na fase de netplay via WebRTC (arquitetura de
 # streaming, decisão #6 do CLAUDE.md — mais distante, não é o modo servidor

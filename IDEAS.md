@@ -825,6 +825,36 @@ de monograma) rende mais visualmente do que antes.
 
 ---
 
+## ✅ #014 — Match manual de capas por nome de arquivo (adendo do #002)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O que é:** o Bruno colocou capas (fotos de caixa) numa subpasta `covers/` dentro da pasta
+de roms de cada sistema (ex: `roms/snes/covers/Nome Da Rom (USA).png`) — curadoria manual
+dele, não um scraper automático (isso continua sendo o `#002`, ainda pendente). O app agora
+casa cada rom com a capa de mesmo nome durante o `reindex_library` e mostra a foto de
+verdade na coluna de capa da `GameList` (em vez do monograma) quando encontra.
+
+**Detalhe do match:** nome do arquivo de capa às vezes troca apóstrofo por `_`
+(`Pugsley's` → `Pugsley_s`, provavelmente convenção de algum scraper que sanitiza nome de
+arquivo) — `normalize_for_cover_match` (`scanner.rs`) cobre isso. Confirmado contando de
+verdade: 529 das 1924 roms de SNES do Bruno bateram (as fotos que ele já tinha baixado não
+cobrem a biblioteca inteira, principalmente jogos só-Japão sem capa USA).
+
+**Como a imagem chega na tela:** `cover_path` é só um caminho de arquivo (coluna que já
+existia no schema, nunca preenchida antes). O webview do Tauri não carrega caminho de
+arquivo local direto num `<img src>` sem configurar escopo do asset protocol — em vez
+disso, `read_cover_image` (novo command, `library.rs`) lê os bytes e devolve como data URI,
+chamado sob demanda só pro jogo selecionado (não em lote no `list_library`, que incharia a
+resposta com 700+ imagens de uma vez).
+
+**Pendência que o próprio Bruno já registrou:** compactar essas capas (arquivos vieram
+grandes, 690×490 sem otimização) — por ora é só teste, sem tratamento de tamanho/cache.
+
+**Depende de:** #002 (é o adendo de capas de lá, versão manual em vez de scraper).
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

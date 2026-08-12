@@ -18,7 +18,7 @@ mod systems;
 use igdb::enrich_player_counts;
 use keyboard_config::write_keyboard_config;
 use launcher::{kill_emulator, launch_emulator};
-use library::{get_system_configs, list_library, reindex_library, save_system_configs};
+use library::{get_system_configs, list_library, read_cover_image, reindex_library, save_system_configs};
 use player_overrides::{get_player_counts, save_player_override};
 use retroarch::{ensure_retroarch_installed, install_retroarch_with_progress, is_retroarch_installed};
 use server::{check_server_online, resolve_lobby_host};
@@ -67,6 +67,7 @@ fn main() {
             save_system_configs,
             reindex_library,
             list_library,
+            read_cover_image,
             ensure_retroarch_installed,
             is_retroarch_installed,
             install_retroarch_with_progress,

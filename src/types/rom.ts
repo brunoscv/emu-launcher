@@ -8,6 +8,7 @@ export interface RomEntry {
   extension: string;
   system: string;
   size_bytes: number;
+  cover_path: string | null;
 }
 
 export interface SystemDefinition {

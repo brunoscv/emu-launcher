@@ -100,11 +100,19 @@ pub fn reindex_library() -> Result<ReindexResult, String> {
 
                 for rom in &roms {
                     tx.execute(
-                        "INSERT INTO games (name, system, rom_path, extension, size_bytes, last_indexed_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                        "INSERT INTO games (name, system, rom_path, extension, size_bytes, cover_path, last_indexed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                          ON CONFLICT(rom_path) DO UPDATE SET
-                            name = ?1, system = ?2, extension = ?4, size_bytes = ?5, last_indexed_at = ?6",
-                        params![rom.name, rom.system, rom.path, rom.extension, rom.size_bytes as i64, indexed_at],
+                            name = ?1, system = ?2, extension = ?4, size_bytes = ?5, cover_path = ?6, last_indexed_at = ?7",
+                        params![
+                            rom.name,
+                            rom.system,
+                            rom.path,
+                            rom.extension,
+                            rom.size_bytes as i64,
+                            rom.cover_path,
+                            indexed_at
+                        ],
                     )
                     .map_err(|e| e.to_string())?;
                 }
@@ -128,7 +136,7 @@ pub fn list_library() -> Result<Vec<RomEntry>, String> {
 fn list_library_with_conn(conn: &rusqlite::Connection) -> Result<Vec<RomEntry>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT name, rom_path, extension, system, size_bytes FROM games
+            "SELECT name, rom_path, extension, system, size_bytes, cover_path FROM games
              WHERE system IN (SELECT system_id FROM system_configs WHERE enabled = 1)
              ORDER BY system, name",
         )
@@ -142,9 +150,29 @@ fn list_library_with_conn(conn: &rusqlite::Connection) -> Result<Vec<RomEntry>, 
                 extension: row.get(2)?,
                 system: row.get(3)?,
                 size_bytes: row.get::<_, i64>(4)? as u64,
+                cover_path: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// Lê a capa do disco e devolve como data URI — o webview do Tauri não
+/// carrega caminho de arquivo local direto num `<img src>` (precisaria do
+/// asset protocol com escopo configurado, ver discussão do IDEAS.md #014);
+/// mais simples e sem superfície de segurança nova é só ler os bytes aqui e
+/// já devolver pronto pra tela. Chamado sob demanda (jogo selecionado na
+/// lista), não em lote — imagem de capa é pequena, mas 700+ de uma vez no
+/// `list_library` incharia a resposta.
+#[tauri::command]
+pub fn read_cover_image(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let mime = if path.to_lowercase().ends_with(".png") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
 }

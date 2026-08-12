@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { RomEntry } from "../types/rom";
 import { systemColor, systemLabel } from "./systemMeta";
 
@@ -56,6 +57,7 @@ export function GameList({
   onClient,
 }: Props) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [coverDataUri, setCoverDataUri] = useState<string | null>(null);
 
   useEffect(() => {
     if (roms.length === 0) {
@@ -71,6 +73,24 @@ export function GameList({
   const selected = roms.find((r) => r.path === selectedPath) ?? null;
   const selectedMaxPlayers = selected ? playerCounts[selected.path] ?? 2 : 2;
   const selectedRunning = selected !== null && selected.path === runningPath;
+
+  // Sob demanda, um de cada vez — não em lote no list_library (ver
+  // read_cover_image em library.rs). Ignora resultado de pedido antigo se o
+  // jogo selecionado já mudou de novo enquanto a leitura ainda rodava.
+  useEffect(() => {
+    let cancelled = false;
+    setCoverDataUri(null);
+    if (selected?.cover_path) {
+      invoke<string>("read_cover_image", { path: selected.cover_path })
+        .then((uri) => {
+          if (!cancelled) setCoverDataUri(uri);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.cover_path]);
 
   return (
     <div className="game-list-wrap">
@@ -146,7 +166,11 @@ export function GameList({
             {selected && (
               <>
                 <div className="game-list__cover" style={{ background: systemColor(selected.system) }}>
-                  <span>{initialsOf(selected.name)}</span>
+                  {coverDataUri ? (
+                    <img className="game-list__cover-img" src={coverDataUri} alt="" />
+                  ) : (
+                    <span>{initialsOf(selected.name)}</span>
+                  )}
                 </div>
 
                 {selectedRunning ? (
@@ -353,11 +377,22 @@ export function GameList({
 
         .game-list__cover {
           width: 100%;
-          aspect-ratio: 3 / 4;
+          /* capas do Bruno vêm 690x490 (~4:3 horizontal) — bate com isso, não
+             mais o 3:4 vertical de capa de caixa de jogo */
+          aspect-ratio: 690 / 490;
           border-radius: var(--radius-sm);
           display: flex;
           align-items: center;
           justify-content: center;
+          overflow: hidden;
+        }
+
+        .game-list__cover-img {
+          width: 100%;
+          height: 100%;
+          /* contain, não cover — garante a foto inteira visível mesmo se
+             algum arquivo vier fora dessa proporção exata */
+          object-fit: contain;
         }
 
         .game-list__cover span {
