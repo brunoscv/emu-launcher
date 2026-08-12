@@ -786,6 +786,45 @@ cores → extraindo → pronto), via evento `retroarch-install-progress` emitido
 
 ---
 
+## ✅ #013 — Carrossel de consoles + identidade visual retro (Batocera/EmulationStation)
+
+**Registrada em:** 12/08/2026 · **Implementada em:** 12/08/2026.
+
+**O pedido:** trocar a navegação "abas de sistema + lista única com tudo misturado" por um
+fluxo em duas telas, estilo Batocera/EmulationStation/Infanto Games: primeiro um carrossel
+pra escolher o console (com contagem de jogos e ano de lançamento), depois a lista de jogos
+só daquele console. Junto, revisar a identidade visual (cores, tipografia) — a paleta
+original ("preto quente"/âmbar) não estava agradando.
+
+**Decisões tomadas no caminho:**
+1. **Fundo do carrossel — sem foto de verdade por enquanto.** Pesquisei pacotes de tema
+   EmulationStation com fotos reais de hardware consistentes entre os 7 sistemas e não achei
+   nada com licença clara (os populares tipo Carbon são ícone vetorial, não foto; os com foto
+   de verdade são temas "mini réplica" de UM console só). `ConsoleCarousel.tsx` lê de
+   `public/consoles/<system_id>.jpg` (pasta gitignored, ver `public/consoles/README.md`) com
+   fallback pra cor sólida do sistema — o Bruno preenche as fotos que quiser, no próprio
+   tempo, sem bloquear o resto.
+2. **Paleta nova (`theme.css`):** preto neutro (era preto quente) + vermelho retro como
+   acento primário (era âmbar de CRT). `--accent-phosphor` manteve o NOME da variável (usada
+   em vários componentes) só trocou de valor — renomear exigiria mexer em todo lugar que
+   referencia, sem ganho real.
+3. **Lista de jogos virou 3 colunas** (nomes / metadados / capa+ações) — mais fiel ao
+   estilo de referência, mas é o mesmo tipo de layout do `GameDetailPanel.tsx`
+   (deprecated, trocado antes por pesar sem GPU real). Mitigado: transform/sombra só no
+   ITEM SELECIONADO da lista (nunca em todos ao mesmo tempo nem em hover de linha) — vale
+   testar de verdade na i7-3537U antes de considerar resolvido.
+4. **Sem metadata inventada.** A coluna de metadados só mostra o que o app sabe de
+   verdade (sistema, tamanho do arquivo, nº de jogadores via IGDB) — não tem
+   desenvolvedora/ano/nota por jogo, esse dado não existe no banco (ver `IDEAS.md` #002,
+   ainda pendente).
+5. **`SystemTabs.tsx` removido** (virou código morto, substituído pelo carrossel).
+
+**Depende de:** nada bloqueante. Reabre a pergunta do `IDEAS.md` #002 (capas via
+`libretro-thumbnails`) — com o carrossel e a coluna de capa maiores, capa de verdade (em vez
+de monograma) rende mais visualmente do que antes.
+
+---
+
 ## Como consultar esse arquivo
 
 Sempre que quiser saber "eu já registrei aquela ideia de tal coisa?", é só perguntar pra

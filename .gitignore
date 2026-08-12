@@ -4,6 +4,11 @@ dist/
 dist-ssr/
 *.local
 
+# Fotos dos consoles do carrossel — procedência do Bruno, não redistribuídas
+# pelo repositório (ver public/consoles/README.md)
+public/consoles/*
+!public/consoles/README.md
+
 # Rust / Tauri
 src-tauri/target/
 src-tauri/gen/

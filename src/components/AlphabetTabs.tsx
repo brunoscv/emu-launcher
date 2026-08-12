@@ -60,7 +60,7 @@ export function AlphabetTabs({ letters, counts, active, onSelect }: Props) {
         }
 
         .alphabet-tab[data-active="true"] {
-          color: var(--bg-void);
+          color: #fff;
           background: var(--accent-phosphor);
         }
       `}</style>

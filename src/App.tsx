@@ -11,8 +11,9 @@ import type {
   EnrichResult,
   EmulatorClosedPayload,
 } from "./types/rom";
-import { SystemTabs } from "./components/SystemTabs";
+import { ConsoleCarousel } from "./components/ConsoleCarousel";
 import { GameList } from "./components/GameList";
+import { KNOWN_SYSTEM_IDS, systemLabel } from "./components/systemMeta";
 import { SystemSelector } from "./components/SystemSelector";
 import { AlphabetTabs, letterGroupOf } from "./components/AlphabetTabs";
 import { Pagination } from "./components/Pagination";
@@ -100,6 +101,27 @@ export default function App() {
     };
   }, []);
 
+  // Esc volta pro carrossel — mesma ideia do "B Voltar" de frontend estilo
+  // Batocera, só que com uma tecla que a gente realmente escuta (não finge
+  // suporte a botão de controle que ainda não está plugado, ver
+  // gamepad/GamepadManager.ts — módulo pronto mas não integrado no App.tsx).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (
+        e.key === "Escape" &&
+        activeSystem !== null &&
+        !showSettings &&
+        !showKeyboardSettings &&
+        !showHotkeys &&
+        !lobby
+      ) {
+        setActiveSystem(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeSystem, showSettings, showKeyboardSettings, showHotkeys, lobby]);
+
   const systemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const rom of roms) {
@@ -107,8 +129,6 @@ export default function App() {
     }
     return counts;
   }, [roms]);
-
-  const availableSystems = useMemo(() => Object.keys(systemCounts).sort(), [systemCounts]);
 
   const visibleRoms = useMemo(() => {
     if (!activeSystem) return roms;
@@ -271,14 +291,22 @@ export default function App() {
         <main className="app-main">
           <LobbyScreen mode={lobby.mode} game={lobby.game} onClose={() => setLobby(null)} />
         </main>
+      ) : activeSystem === null ? (
+        <main className="app-main">
+          <ConsoleCarousel
+            systemIds={KNOWN_SYSTEM_IDS}
+            counts={systemCounts}
+            onSelect={setActiveSystem}
+          />
+        </main>
       ) : (
         <>
-          <SystemTabs
-            systems={availableSystems}
-            counts={systemCounts}
-            active={activeSystem}
-            onSelect={(s) => setActiveSystem(s === activeSystem ? null : s)}
-          />
+          <div className="active-system-bar">
+            <button className="active-system-bar__back" onClick={() => setActiveSystem(null)}>
+              ← Consoles (Esc)
+            </button>
+            <span className="active-system-bar__label">{systemLabel(activeSystem)}</span>
+          </div>
 
           <div className="search-row">
             <input
@@ -315,6 +343,15 @@ export default function App() {
           </main>
 
           <Pagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+
+          <footer className="game-footer">
+            <span className="game-footer__key">
+              <span className="game-footer__key-badge">Esc</span> Voltar
+            </span>
+            <span className="game-footer__key">
+              <span className="game-footer__key-badge">▶</span> Jogar
+            </span>
+          </footer>
         </>
       )}
 
@@ -354,7 +391,7 @@ export default function App() {
           gap: 0.5rem;
           padding: 0.55rem 1rem;
           background: var(--accent-phosphor);
-          color: var(--bg-void);
+          color: #fff;
           border: none;
           border-radius: var(--radius-sm);
           font-weight: 600;
@@ -381,6 +418,63 @@ export default function App() {
           color: var(--ink-primary);
           font-size: 0.85rem;
           border-bottom: 1px solid var(--border-soft);
+        }
+
+        .active-system-bar {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.75rem 1.5rem;
+          border-bottom: 1px solid var(--border-soft);
+        }
+
+        .active-system-bar__back {
+          background: transparent;
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          color: var(--ink-primary);
+          padding: 0.4rem 0.8rem;
+          font-size: 0.85rem;
+          cursor: pointer;
+        }
+
+        .active-system-bar__label {
+          font-family: var(--font-display);
+          font-size: 0.95rem;
+          color: var(--accent-phosphor);
+        }
+
+        .game-footer {
+          display: flex;
+          justify-content: center;
+          gap: 1.5rem;
+          padding: 0.65rem;
+          border-top: 1px solid var(--border-soft);
+        }
+
+        .game-footer__key {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--ink-muted);
+        }
+
+        .game-footer__key-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 1.4rem;
+          height: 1.4rem;
+          padding: 0 0.3rem;
+          border-radius: 999px;
+          background: var(--bg-panel);
+          border: 1px solid var(--border-strong);
+          color: var(--ink-primary);
+          font-size: 0.7rem;
         }
 
         .search-row {
