@@ -14,6 +14,7 @@ mod scanner;
 mod server;
 mod settings;
 mod systems;
+mod tailscale_install;
 
 use igdb::enrich_player_counts;
 use keyboard_config::write_keyboard_config;
@@ -27,6 +28,7 @@ use settings::{
     save_dedicated_server_host, save_public_host_address,
 };
 use systems::list_systems;
+use tailscale_install::{ensure_tailscale_installed, is_tailscale_installed};
 
 fn main() {
     // .env vive na raiz do projeto (um nível acima do Cargo.toml, em
@@ -86,6 +88,8 @@ fn main() {
             save_public_host_address,
             get_local_lan_ip,
             get_tailscale_ip,
+            is_tailscale_installed,
+            ensure_tailscale_installed,
             write_keyboard_config,
             kill_emulator,
             open_retroarch

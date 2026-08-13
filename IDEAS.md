@@ -1230,30 +1230,71 @@ versionado), crate `tsnet` de `passcod/libtailscale`, resultados reais:
   um runner Linux é historicamente instável — pode forçar runner Windows nativo no GitHub
   Actions).
 
-**Conclusão parcial:** Rota A é tecnicamente viável — não é só teoria, o node embutido
-conecta e transporta TCP+UDP de verdade, inclusive (com bastante confiança, mas não 100%
-certeza) atravessando duas redes diferentes de fato. O bug do musl é o achado mais
-importante dessa rodada de testes: muda a estratégia de distribuição (compilar/baixar
-binário nativo por SO, não um estático universal). Segue como caminho principal; a Rota B
-continua documentada como fallback caso o teste real entre duas redes diferentes (repetir
-quando a internet móvel estiver estável) ou o
-build de Windows travem.
+**Conclusão parcial (Linux):** Rota A é tecnicamente viável — não é só teoria, o node
+embutido conecta e transporta TCP+UDP de verdade, inclusive (com bastante confiança, mas não
+100% certeza) atravessando duas redes diferentes de fato. O bug do musl foi outro achado
+importante: muda a estratégia de distribuição (compilar/baixar binário nativo por SO, não um
+estático universal).
+
+### Windows: bloqueio real encontrado (13/08/2026) — não é só risco, é estrutural
+
+Workflow de teste isolado (`.github/workflows/test-tsnet-windows.yml`) rodado de verdade no
+GitHub Actions, dois jobs (MSVC+MinGW-só-pro-Go, e GNU consistente) — **os dois falharam no
+build**, mesmo erro exato nos dois:
+
+```
+tailscale.c:5:10: fatal error: sys/socket.h: No such file or directory
+```
+
+Investigando o código-fonte do `tailscale.c` (a ponte C entre o Go e o Rust dentro do
+`passcod/libtailscale`): a função `tailscale_accept` (usada por `.listen()`/aceitar conexão,
+que é o que a Rota A precisa tanto pro lobby quanto pro netplay) é implementada com
+`recvmsg()` + `CMSG_FIRSTHDR`/`CMSG_DATA` — a técnica POSIX clássica de **passar um file
+descriptor entre processos via socket** (é assim que o processo Go conversa com a camada
+C/Rust por baixo). Isso **não tem equivalente direto no Windows** — não é biblioteca
+faltando nem flag de compilador errada, é um mecanismo de sistema operacional que o Windows
+não oferece do mesmo jeito. Não é um "patch de um include" — é uma dependência estrutural de
+como a lib inteira foi desenhada.
+
+**Importante não confundir:** isso não quer dizer que "Tailscale não roda no Windows" — a
+Rota B (Tailscale de verdade instalado, que já implementamos a detecção em `settings.rs`)
+funciona perfeitamente lá, é o app oficial deles, maduro, usado por milhões. O problema é
+específico dessa ponte C/Rust de terceiro que a Rota A depende pra embutir — ninguém portou
+essa parte pro Windows ainda.
+
+**Opções daqui pra frente:**
+1. **Híbrido por SO:** Rota A (embutido, invisível) em Linux/Mac, Rota B (Tailscale
+   instalado, com aquele UAC de instalador) só no Windows — mais complexidade de manter dois
+   caminhos, mas nenhum dos dois é trabalho perdido (já implementamos os dois em partes).
+2. **Contribuir o suporte a Windows no `passcod/libtailscale` upstream** — trabalho real de
+   C/Go, reescrever esse mecanismo de handoff pra algo que exista no Windows (ex: named
+   pipes, ou duplicar o socket com `WSADuplicateSocket` em vez de `SCM_RIGHTS`). Não é
+   pequeno, é contribuição de código aberto de verdade, sem prazo garantido de aceite.
+3. **Investigar a alternativa 100% Rust** (`tailscale-rs`, o preview oficial da própria
+   Tailscale, sem nenhum C/cgo por baixo) — pode não ter essa limitação especificamente por
+   não depender dessa técnica de fd-passing, mas o próprio projeto se descreve como
+   "unstable and insecure", e é uma reimplementação independente de uma stack de rede/cripto
+   complexa — mais um caminho a validar do zero, não uma solução garantida.
 
 ### Plano faseado
 
 1. ~~Protótipo isolado confirmando build + TCP/UDP básico~~ — feito, ver seção acima.
-2. **Próximo:** repetir o teste de conectividade com uma segunda máquina numa rede diferente
-   (peça pro amigo rodar o mesmo binário, ou usar um celular em dados móveis como "rede 2")
-   — isso testa NAT traversal de verdade entre dois CGNATs, não só localhost.
-3. **Se esse teste falhar ou o build de Windows travar:** cai pra Rota B (bundle do binário
-   real + instalador MSI com WinTun) como plano validado.
-4. **Microserviço de auth key na Vercel** — endpoint mínimo, client OAuth criado no painel do
+2. ~~Teste de conectividade entre duas redes diferentes (CGNAT de casa + hotspot)~~ —
+   tentado, resultado promissor mas não 100% confiável (ver ressalva acima). Pendente
+   repetir quando a internet móvel estiver estável.
+3. ~~Build no Windows via GitHub Actions~~ — **falhou nos dois jobs**, bloqueio estrutural
+   confirmado (ver seção acima), não é só "travou por falta de configuração".
+4. **Decisão em aberto com o Bruno:** qual das três opções de contorno pro Windows (híbrido
+   por SO, contribuir upstream, ou investigar `tailscale-rs`) — sem essa decisão, os passos
+   abaixo (auth key, ACL, integração final) não sabem se precisam suportar dois caminhos de
+   rede diferentes por SO ou só um.
+5. **Microserviço de auth key na Vercel** — endpoint mínimo, client OAuth criado no painel do
    Tailscale, testar geração de key efêmera de ponta a ponta antes de plugar no app.
-5. **Implementar leitura de IP/status via `tailscale_loopback`** — gap confirmado acima, sem
+6. **Implementar leitura de IP/status via `tailscale_loopback`** — gap confirmado acima, sem
    isso a UI não sabe o que mostrar pro usuário.
-6. **ACL da tailnet** — configurar `tag:host`/`tag:guest` e a regra de isolamento antes de
+7. **ACL da tailnet** — configurar `tag:host`/`tag:guest` e a regra de isolamento antes de
    convidar o primeiro amigo de verdade.
-7. **Integração final no app** — reaproveita a UI já existente do #006/#017
+8. **Integração final no app** — reaproveita a UI já existente do #006/#017
    (`InternetSettings.tsx`), mas troca o fluxo manual por um botão único tipo "Convidar
    amigo" que já resolve tudo sem precisar da tela de "abre o painel do roteador".
 
@@ -1279,6 +1320,48 @@ nosso próprio app, sem digitar IP nem código de convite manual de rede.
   declarar sucesso.
 - Cota de "minutos-recurso efêmero" do plano grátis (1.000/mês) — não confirmado se afeta
   esse uso; verificar com conta de teste antes de depender disso a longo prazo.
+
+### Pivô de prioridade (13/08/2026) — Windows primeiro, via Rota B
+
+Decisão do Bruno: 100% dos amigos usam Windows, e o objetivo agora é ter uma versão Windows
+**estável e funcional**, não perfeita/invisível. Como a Rota A tem bloqueio estrutural real
+no Windows (seção acima), o caminho pro Windows deixa de ser "esperar a Rota A resolver" e
+vira **Rota B com instalação automatizada** — não é mais só fallback teórico, é o plano
+principal pro Windows enquanto a Rota A fica reservada pro Linux (uso do próprio Bruno
+programando) e como possível unificação futura, não bloqueante.
+
+**Implementado (13/08/2026):**
+- **`tailscale_install.rs`** (novo módulo, mesmo padrão do `retroarch.rs`) — `ensure_tailscale_installed`
+  baixa o instalador oficial (`https://pkgs.tailscale.com/stable/tailscale-setup-1.102.2-amd64.msi`,
+  versão fixa confirmada em 13/08/2026, mesmo espírito da versão fixa do RetroArch) e roda
+  `msiexec /i ... /quiet /norestart TS_NOLAUNCH=1` **elevado** via crate `runas` (dispara o
+  UAC só pra esse processo filho, não eleva o app inteiro). `TS_NOLAUNCH=1` evita o ícone da
+  bandeja deles aparecer — tudo controlado via `tailscale.exe` na linha de comando a partir
+  daqui, igual `get_tailscale_ip` já fazia. `is_tailscale_installed` checa o caminho
+  conhecido (`%ProgramFiles%\Tailscale\tailscale.exe`) antes do PATH, porque o PATH de um
+  processo já rodando não atualiza sozinho depois que um instalador roda.
+- **`InternetSettings.tsx`** — botão "Instalar Tailscale automaticamente" na seção 6, com
+  barra de progresso (reaproveita o mesmo padrão visual do instalador do RetroArch em
+  `SystemSelector.tsx`), aparece só quando `is_tailscale_installed` volta `false`.
+- Só Windows por enquanto (`require_windows()` recusa explicitamente em outro SO) — decisão
+  deliberada de não tentar suportar Linux nessa função ainda, pra não gastar tempo num
+  caminho que o Bruno não vai usar no curto prazo.
+
+**Não verificado ainda (mesma ressalva que o `#003` teve antes de validar o RetroArch no
+Windows):** nunca rodou numa máquina Windows real. `cargo check --target x86_64-pc-windows-gnu`
+localmente esbarrou em falta do toolchain MinGW completo (mesmo problema visto no teste do
+`tsnet`) — validação real depende do `build-windows.yml` (CI) ou de testar na máquina de um
+amigo de verdade.
+
+**Falta pra fechar o Windows de ponta a ponta:**
+1. Validar que compila no `build-windows.yml` de verdade (diferente do `test-tsnet-windows.yml`,
+   esse aqui não depende de Go/cgo — só baixa e roda um `.msi` oficial, risco bem menor).
+2. Testar numa máquina Windows real: será que o UAC aparece do jeito esperado, será que
+   `TS_NOLAUNCH=1` realmente evita o ícone, será que `is_tailscale_installed` detecta certo
+   logo depois de instalar.
+3. **Microserviço de auth key (Vercel)** — sem isso, depois de instalado o Tailscale ainda
+   pede login manual (abrir navegador, entrar com conta) da primeira vez. Automatizar isso é
+   o próximo passo real pra fechar "amigo só clica instalar, mais nada".
 
 ---
 
