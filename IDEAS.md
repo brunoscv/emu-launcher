@@ -1284,19 +1284,30 @@ essa parte pro Windows ainda.
    repetir quando a internet móvel estiver estável.
 3. ~~Build no Windows via GitHub Actions~~ — **falhou nos dois jobs**, bloqueio estrutural
    confirmado (ver seção acima), não é só "travou por falta de configuração".
-4. **Decisão em aberto com o Bruno:** qual das três opções de contorno pro Windows (híbrido
-   por SO, contribuir upstream, ou investigar `tailscale-rs`) — sem essa decisão, os passos
-   abaixo (auth key, ACL, integração final) não sabem se precisam suportar dois caminhos de
-   rede diferentes por SO ou só um.
-5. **Microserviço de auth key na Vercel** — endpoint mínimo, client OAuth criado no painel do
-   Tailscale, testar geração de key efêmera de ponta a ponta antes de plugar no app.
-6. **Implementar leitura de IP/status via `tailscale_loopback`** — gap confirmado acima, sem
-   isso a UI não sabe o que mostrar pro usuário.
-7. **ACL da tailnet** — configurar `tag:host`/`tag:guest` e a regra de isolamento antes de
-   convidar o primeiro amigo de verdade.
-8. **Integração final no app** — reaproveita a UI já existente do #006/#017
-   (`InternetSettings.tsx`), mas troca o fluxo manual por um botão único tipo "Convidar
-   amigo" que já resolve tudo sem precisar da tela de "abre o painel do roteador".
+4. ~~Decisão sobre o contorno pro Windows~~ — **resolvida em 13/08/2026:** Windows vira Rota
+   B (Tailscale de verdade, instalado/logado pelo nosso app), Rota A fica só pro Linux
+   (Bruno programando) sem prazo — ver seção "Pivô de prioridade" acima. `tailscale-rs` e
+   contribuição upstream ficam descartados por ora, não bloqueando mais nada.
+5. ~~ACL da tailnet~~ — **feito em 13/08/2026:** `tag:host`/`tag:guest` criadas, `grants`
+   restringindo convidado a só alcançar `tag:host` nas portas 7777 TCP / 55435 TCP+UDP (o
+   resto da tailnet do Bruno fica invisível pra convidado).
+6. ~~Microserviço de auth key na Vercel~~ — **implementado em 13/08/2026:**
+   `vercel-tailscale-keys/api/mint-key.js`, endpoint `POST /api/mint-key` protegido por
+   segredo compartilhado (header `x-emu-launcher-secret`), troca o OAuth client (escopo
+   `auth_keys`, restrito a `tag:guest`) por um token de curta duração e gera uma auth key
+   efêmera/pré-autorizada (`expirySeconds: 300` — vive só o tempo de ser usada na hora).
+   Client ID/Secret do Tailscale nunca tocam o código nem o app distribuído, só existem como
+   variável de ambiente na Vercel. **Ainda não testado ponta a ponta** (depende do deploy na
+   Vercel, que o Bruno está fazendo).
+7. **Integrar no app Rust** — novo command tipo `join_tailnet_as_guest` que chama o endpoint
+   da Vercel, pega a `key`, e roda `tailscale up --authkey=<key>` (variação do
+   `start_tailscale_login` que já existe, mas sem fluxo de navegador nenhum). É esse command
+   que o botão "Cliente" deveria disparar antes de tentar conectar num host — ainda não
+   escrito.
+8. **Integração final na UI** — reaproveita `InternetSettings.tsx`/`LobbyScreen.tsx`, mas o
+   fluxo de "Cliente" passa a chamar o `join_tailnet_as_guest` sozinho, sem o amigo precisar
+   nem saber que existe uma tela de Tailscale — só clica "Cliente", digita o código da sala,
+   pronto.
 
 **Depende de:** #006 (motivação e IP local/público já resolvidos) — nada bloqueante além
 disso, mas é bastante trabalho novo de infraestrutura (microserviço externo, pipeline de

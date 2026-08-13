@@ -1,0 +1,6 @@
+{
+  "name": "vercel-tailscale-keys",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Microserviço que gera auth keys efêmeras do Tailscale sob demanda, pro emu-launcher convidar amigos pra tailnet sem eles precisarem logar em nada (IDEAS.md #021)."
+}

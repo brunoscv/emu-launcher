@@ -26,6 +26,7 @@ rand = "0.8"
 ctrlc = "3"
 base64 = "0.22"
 runas = "1"
+open = "5"
 
 # Descomente quando chegar na fase de netplay via WebRTC (arquitetura de
 # streaming, decisão #6 do CLAUDE.md — mais distante, não é o modo servidor

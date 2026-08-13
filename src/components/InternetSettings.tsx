@@ -44,6 +44,9 @@ export function InternetSettings({ onClose }: Props) {
     null
   );
   const [tailscaleInstallError, setTailscaleInstallError] = useState<string | null>(null);
+  const [tailscaleLoggingIn, setTailscaleLoggingIn] = useState(false);
+  const [tailscaleLoginUrl, setTailscaleLoginUrl] = useState<string | null>(null);
+  const [tailscaleLoginError, setTailscaleLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<string>("get_local_lan_ip")
@@ -64,6 +67,45 @@ export function InternetSettings({ onClose }: Props) {
       unlistenPromise.then((fn) => fn());
     };
   }, []);
+
+  useEffect(() => {
+    const unlistenPromise = listen<string>("tailscale-login-url", (event) => {
+      setTailscaleLoginUrl(event.payload);
+    });
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, []);
+
+  // Depois de "tailscale up" ser disparado, o login acontece no navegador
+  // (fora do nosso controle) — em vez de pedir pra apertar "atualizar" na
+  // mão, confere sozinho de tempos em tempos se já logou, por até 2 minutos.
+  async function pollForLogin() {
+    for (let i = 0; i < 24; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const ip = await invoke<string | null>("get_tailscale_ip");
+      if (ip) {
+        setTailscaleIp(ip);
+        setTailscaleLoggingIn(false);
+        setTailscaleLoginUrl(null);
+        return;
+      }
+    }
+    setTailscaleLoggingIn(false);
+  }
+
+  async function handleTailscaleLogin() {
+    setTailscaleLoginError(null);
+    setTailscaleLoginUrl(null);
+    setTailscaleLoggingIn(true);
+    try {
+      await invoke("start_tailscale_login");
+      pollForLogin();
+    } catch (e) {
+      setTailscaleLoginError(String(e));
+      setTailscaleLoggingIn(false);
+    }
+  }
 
   // Só Windows por enquanto (IDEAS.md #021) — o backend recusa em qualquer
   // outro SO com uma mensagem clara, então não precisa esconder o botão
@@ -225,59 +267,107 @@ export function InternetSettings({ onClose }: Props) {
         </p>
 
         {!tailscaleChecked ? (
-          <p className="internet-settings__hint">Verificando se o Tailscale está instalado...</p>
-        ) : tailscaleIp ? (
-          <>
-            <p>
-              Tailscale rodando, IP desta máquina na tailnet:{" "}
-              <span className="internet-settings__mono internet-settings__ip">{tailscaleIp}</span>
-            </p>
-            <button
-              className="btn-scan"
-              onClick={() => setPublicAddress(tailscaleIp)}
-              disabled={publicAddress === tailscaleIp}
-            >
-              Usar esse IP no campo do passo 4
-            </button>
-          </>
+          <p className="internet-settings__hint">Verificando o Tailscale...</p>
         ) : (
           <>
-            <p className="internet-settings__hint">Tailscale não detectado nesta máquina.</p>
+            <p className="internet-settings__status-row">
+              {tailscaleInstalled ? (
+                <span className="internet-settings__badge internet-settings__badge--ok">✅ Instalado</span>
+              ) : (
+                <span className="internet-settings__badge internet-settings__badge--missing">
+                  ⬇ Não instalado
+                </span>
+              )}
+              {tailscaleIp ? (
+                <span className="internet-settings__badge internet-settings__badge--ok">✅ Conectado</span>
+              ) : (
+                <span className="internet-settings__badge internet-settings__badge--missing">
+                  ⏳ Não conectado
+                </span>
+              )}
+            </p>
 
-            {tailscaleInstallError && (
-              <div className="internet-settings__error">{tailscaleInstallError}</div>
-            )}
-
-            {tailscaleInstallProgress ? (
-              <p className="internet-settings__hint">
-                {TAILSCALE_PHASE_LABEL[tailscaleInstallProgress.phase] ?? "Instalando..."}
-                {tailscaleInstallProgress.total_bytes
-                  ? ` (${Math.round(
-                      (tailscaleInstallProgress.downloaded_bytes / tailscaleInstallProgress.total_bytes) *
-                        100
-                    )}%)`
-                  : ""}
-              </p>
-            ) : (
-              tailscaleInstalled === false && (
-                <button className="btn-scan" onClick={handleInstallTailscale}>
-                  Instalar Tailscale automaticamente
+            {tailscaleIp && (
+              <>
+                <p>
+                  IP desta máquina na tailnet:{" "}
+                  <span className="internet-settings__mono internet-settings__ip">{tailscaleIp}</span>
+                </p>
+                <button
+                  className="btn-scan"
+                  onClick={() => setPublicAddress(tailscaleIp)}
+                  disabled={publicAddress === tailscaleIp}
+                >
+                  Usar esse IP no campo do passo 4
                 </button>
-              )
+              </>
             )}
 
-            <p className="internet-settings__hint">
-              Instalação automática funciona no Windows (vai pedir permissão de administrador
-              uma vez, igual instalar qualquer programa — depois disso fica tudo controlado por
-              aqui, sem abrir a interface deles). No Linux, ainda precisa rodar você mesmo:
-            </p>
-            <pre className="internet-settings__code">
-              curl -fsSL https://tailscale.com/install.sh | sh{"\n"}sudo tailscale up
-            </pre>
-            <p className="internet-settings__hint">
-              Depois de instalado (de um jeito ou de outro), volta nessa tela — o IP aparece
-              aqui automaticamente.
-            </p>
+            {!tailscaleInstalled && (
+              <>
+                {tailscaleInstallError && (
+                  <div className="internet-settings__error">{tailscaleInstallError}</div>
+                )}
+
+                {tailscaleInstallProgress ? (
+                  <p className="internet-settings__hint">
+                    {TAILSCALE_PHASE_LABEL[tailscaleInstallProgress.phase] ?? "Instalando..."}
+                    {tailscaleInstallProgress.total_bytes
+                      ? ` (${Math.round(
+                          (tailscaleInstallProgress.downloaded_bytes /
+                            tailscaleInstallProgress.total_bytes) *
+                            100
+                        )}%)`
+                      : ""}
+                  </p>
+                ) : (
+                  <button className="btn-scan" onClick={handleInstallTailscale}>
+                    Instalar Tailscale automaticamente
+                  </button>
+                )}
+
+                <p className="internet-settings__hint">
+                  Instalação automática funciona no Windows (vai pedir permissão de administrador
+                  uma vez, igual instalar qualquer programa). No Linux, ainda precisa rodar você
+                  mesmo:
+                </p>
+                <pre className="internet-settings__code">
+                  curl -fsSL https://tailscale.com/install.sh | sh{"\n"}sudo tailscale up
+                </pre>
+              </>
+            )}
+
+            {tailscaleInstalled && !tailscaleIp && (
+              <>
+                <p className="internet-settings__hint">
+                  Instalado, mas falta logar — sem isso o Tailscale não conecta em lugar nenhum.
+                </p>
+
+                {tailscaleLoginError && (
+                  <div className="internet-settings__error">{tailscaleLoginError}</div>
+                )}
+
+                {tailscaleLoggingIn ? (
+                  <p className="internet-settings__hint">
+                    Aguardando login no navegador...
+                    {tailscaleLoginUrl && (
+                      <>
+                        {" "}
+                        Se não abriu sozinho,{" "}
+                        <a href={tailscaleLoginUrl} target="_blank" rel="noreferrer">
+                          clica aqui
+                        </a>
+                        .
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  <button className="btn-scan" onClick={handleTailscaleLogin}>
+                    Fazer login
+                  </button>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -379,6 +469,28 @@ export function InternetSettings({ onClose }: Props) {
 
         .internet-settings__mono {
           font-family: var(--font-mono);
+        }
+
+        .internet-settings__status-row {
+          display: flex;
+          gap: 0.5rem;
+          margin: 0 0 0.75rem;
+        }
+
+        .internet-settings__badge {
+          font-size: 0.8rem;
+          font-weight: 600;
+          padding: 0.15rem 0.55rem;
+          border-radius: var(--radius-sm);
+          background: var(--bg-panel);
+        }
+
+        .internet-settings__badge--ok {
+          color: var(--accent-teal);
+        }
+
+        .internet-settings__badge--missing {
+          color: var(--ink-muted);
         }
 
         .internet-settings__code {
