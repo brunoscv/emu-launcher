@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 interface Props {
   onClose: () => void;
 }
+
+interface TailscaleInstallProgress {
+  phase: string;
+  downloaded_bytes: number;
+  total_bytes: number | null;
+}
+
+const TAILSCALE_PHASE_LABEL: Record<string, string> = {
+  baixando: "Baixando o instalador do Tailscale...",
+  instalando: "Instalando (deve pedir permissão de administrador)...",
+};
 
 /**
  * Tela "🌐 Jogar pela Internet" (IDEAS.md #006/#017) — LAN funciona sozinha,
@@ -27,6 +39,11 @@ export function InternetSettings({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [tailscaleIp, setTailscaleIp] = useState<string | null>(null);
   const [tailscaleChecked, setTailscaleChecked] = useState(false);
+  const [tailscaleInstalled, setTailscaleInstalled] = useState<boolean | null>(null);
+  const [tailscaleInstallProgress, setTailscaleInstallProgress] = useState<TailscaleInstallProgress | null>(
+    null
+  );
+  const [tailscaleInstallError, setTailscaleInstallError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<string>("get_local_lan_ip")
@@ -36,7 +53,35 @@ export function InternetSettings({ onClose }: Props) {
     invoke<string | null>("get_tailscale_ip")
       .then(setTailscaleIp)
       .finally(() => setTailscaleChecked(true));
+    invoke<boolean>("is_tailscale_installed").then(setTailscaleInstalled);
   }, []);
+
+  useEffect(() => {
+    const unlistenPromise = listen<TailscaleInstallProgress>("tailscale-install-progress", (event) => {
+      setTailscaleInstallProgress(event.payload);
+    });
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, []);
+
+  // Só Windows por enquanto (IDEAS.md #021) — o backend recusa em qualquer
+  // outro SO com uma mensagem clara, então não precisa esconder o botão
+  // artificialmente aqui, só deixar o erro falar por si se clicar em Linux/Mac.
+  async function handleInstallTailscale() {
+    setTailscaleInstallError(null);
+    setTailscaleInstallProgress({ phase: "baixando", downloaded_bytes: 0, total_bytes: null });
+    try {
+      await invoke("ensure_tailscale_installed");
+      setTailscaleInstalled(true);
+      const ip = await invoke<string | null>("get_tailscale_ip");
+      setTailscaleIp(ip);
+    } catch (e) {
+      setTailscaleInstallError(String(e));
+    } finally {
+      setTailscaleInstallProgress(null);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -197,17 +242,41 @@ export function InternetSettings({ onClose }: Props) {
           </>
         ) : (
           <>
+            <p className="internet-settings__hint">Tailscale não detectado nesta máquina.</p>
+
+            {tailscaleInstallError && (
+              <div className="internet-settings__error">{tailscaleInstallError}</div>
+            )}
+
+            {tailscaleInstallProgress ? (
+              <p className="internet-settings__hint">
+                {TAILSCALE_PHASE_LABEL[tailscaleInstallProgress.phase] ?? "Instalando..."}
+                {tailscaleInstallProgress.total_bytes
+                  ? ` (${Math.round(
+                      (tailscaleInstallProgress.downloaded_bytes / tailscaleInstallProgress.total_bytes) *
+                        100
+                    )}%)`
+                  : ""}
+              </p>
+            ) : (
+              tailscaleInstalled === false && (
+                <button className="btn-scan" onClick={handleInstallTailscale}>
+                  Instalar Tailscale automaticamente
+                </button>
+              )
+            )}
+
             <p className="internet-settings__hint">
-              Tailscale não detectado nesta máquina. Instalação no Linux (pede confirmação de
-              senha do sistema, então precisa rodar você mesmo num terminal):
+              Instalação automática funciona no Windows (vai pedir permissão de administrador
+              uma vez, igual instalar qualquer programa — depois disso fica tudo controlado por
+              aqui, sem abrir a interface deles). No Linux, ainda precisa rodar você mesmo:
             </p>
             <pre className="internet-settings__code">
               curl -fsSL https://tailscale.com/install.sh | sh{"\n"}sudo tailscale up
             </pre>
             <p className="internet-settings__hint">
-              O segundo comando abre uma página no navegador pra logar (conta Google/Microsoft/
-              GitHub, é grátis pra uso pessoal). Depois disso, volta nessa tela — o IP some
-              daqui automaticamente.
+              Depois de instalado (de um jeito ou de outro), volta nessa tela — o IP aparece
+              aqui automaticamente.
             </p>
           </>
         )}
