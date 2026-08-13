@@ -74,7 +74,7 @@ export default async function handler(req, res) {
           },
         },
         expirySeconds: KEY_EXPIRY_SECONDS,
-        description: "emu-launcher - convidado (gerada sob demanda)",
+        description: "emu-launcher guest key",
       }),
     });
     if (!keyResponse.ok) {
