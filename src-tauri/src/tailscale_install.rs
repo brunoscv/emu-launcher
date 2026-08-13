@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::Emitter;
 
@@ -7,6 +7,17 @@ use tauri::Emitter;
 /// entre uma instalação e outra. Confirmado via pkgs.tailscale.com/stable/
 /// em 13/08/2026 (IDEAS.md #021).
 const TAILSCALE_VERSION: &str = "1.102.2";
+
+/// Microserviço próprio (`vercel-tailscale-keys/`, IDEAS.md #021) que gera
+/// auth key efêmera sob demanda — é o que deixa o app do amigo entrar na
+/// tailnet sem logar em nada. O segredo compartilhado embutido aqui não é
+/// segredo "de verdade" (qualquer um que descompilar o app acha ele) — mas
+/// o pior cenário de vazamento é só permitir gerar mais chaves de
+/// convidado (`tag:guest`, restrita pelo ACL a alcançar só `tag:host` nas
+/// portas do jogo), nunca acesso administrativo à tailnet. Trade-off
+/// aceito de propósito, documentado no `mint-key.js`.
+const MINT_KEY_URL: &str = "https://emu-launcher-vq6y.vercel.app/api/mint-key";
+const MINT_KEY_SHARED_SECRET: &str = "584d0fc52b61e63e75ac57e8dd47f0dd190fa29833ea582b5b689de148ccb5f3";
 
 /// Só Windows por enquanto (IDEAS.md #021 — decisão do Bruno de focar no
 /// Windows primeiro, já que é o que os amigos usam; Linux fica pra depois,
@@ -218,6 +229,57 @@ fn run_installer_elevated(msi_path: &PathBuf) -> Result<(), String> {
 
     if !status.success() {
         return Err(format!("instalador terminou com código {:?} (talvez UAC cancelado)", status.code()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct MintKeyResponse {
+    key: Option<String>,
+    error: Option<String>,
+}
+
+/// Fluxo do "Cliente" (o amigo, IDEAS.md #021) — instala o Tailscale se
+/// ainda não tiver (mesmo instalador silencioso do `ensure_tailscale_installed`,
+/// UAC só nesse passo) e pede uma auth key descartável pro microserviço da
+/// Vercel pra entrar na tailnet direto, sem NENHUM login/navegador
+/// aparecer (diferente de `start_tailscale_login`, que é o fluxo do host,
+/// com conta própria). Uma ação só, do jeito que o amigo só clica
+/// "Cliente" e nem sabe que Tailscale existe.
+///
+/// `tailscale up --authkey=...` no Windows não pede elevação (diferente da
+/// instalação do driver) — só fala com o serviço já rodando, por isso não
+/// passa por `runas` aqui.
+#[tauri::command]
+pub async fn join_tailnet_as_guest(app: tauri::AppHandle) -> Result<(), String> {
+    require_windows()?;
+
+    if !is_tailscale_installed() {
+        ensure_tailscale_installed(app.clone()).await?;
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(MINT_KEY_URL)
+        .header("x-emu-launcher-secret", MINT_KEY_SHARED_SECRET)
+        .send()
+        .await
+        .map_err(|e| format!("não consegui falar com o serviço de convite: {e}"))?;
+
+    let body: MintKeyResponse = response.json().await.map_err(|e| e.to_string())?;
+    let key = body
+        .key
+        .ok_or_else(|| body.error.unwrap_or_else(|| "serviço de convite não devolveu uma chave".to_string()))?;
+
+    let status = tokio::process::Command::new("tailscale")
+        .arg("up")
+        .arg(format!("--authkey={key}"))
+        .status()
+        .await
+        .map_err(|e| format!("não consegui rodar 'tailscale up': {e}"))?;
+
+    if !status.success() {
+        return Err(format!("'tailscale up' terminou com código {:?}", status.code()));
     }
     Ok(())
 }

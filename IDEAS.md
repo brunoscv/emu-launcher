@@ -1297,17 +1297,31 @@ essa parte pro Windows ainda.
    `auth_keys`, restrito a `tag:guest`) por um token de curta duração e gera uma auth key
    efêmera/pré-autorizada (`expirySeconds: 300` — vive só o tempo de ser usada na hora).
    Client ID/Secret do Tailscale nunca tocam o código nem o app distribuído, só existem como
-   variável de ambiente na Vercel. **Ainda não testado ponta a ponta** (depende do deploy na
-   Vercel, que o Bruno está fazendo).
-7. **Integrar no app Rust** — novo command tipo `join_tailnet_as_guest` que chama o endpoint
-   da Vercel, pega a `key`, e roda `tailscale up --authkey=<key>` (variação do
-   `start_tailscale_login` que já existe, mas sem fluxo de navegador nenhum). É esse command
-   que o botão "Cliente" deveria disparar antes de tentar conectar num host — ainda não
-   escrito.
-8. **Integração final na UI** — reaproveita `InternetSettings.tsx`/`LobbyScreen.tsx`, mas o
-   fluxo de "Cliente" passa a chamar o `join_tailnet_as_guest` sozinho, sem o amigo precisar
-   nem saber que existe uma tela de Tailscale — só clica "Cliente", digita o código da sala,
-   pronto.
+   variável de ambiente na Vercel. **Testado ponta a ponta de verdade em 13/08/2026:** deploy
+   feito (`emu-launcher-vq6y.vercel.app`), endpoint chamado via `curl` devolveu uma auth key
+   real (`tskey-auth-...`) — só precisou de um ajuste (a `description` original tinha
+   acento/parênteses, a API do Tailscale rejeita, trocada pra texto simples em ASCII).
+7. ~~Integrar no app Rust~~ — **feito em 13/08/2026:** novo command `join_tailnet_as_guest`
+   (`tailscale_install.rs`) chama o endpoint da Vercel, e se o Tailscale ainda nem estiver
+   instalado, instala sozinho primeiro (`ensure_tailscale_installed`) — uma ação só. Não pede
+   elevação (diferente da instalação do driver): `tailscale up --authkey=...` só fala com o
+   serviço já rodando.
+8. ~~Integração final na UI~~ — **feito em 13/08/2026:** `LobbyScreen.tsx`, em
+   `handleStart()` modo "client", detecta se o endereço digitado começa com `100.` (só existe
+   dentro de uma tailnet) e chama `join_tailnet_as_guest` antes de conectar — IP de LAN
+   normal não passa por isso, conecta direto como sempre. O amigo só clica "Cliente", digita
+   o código da sala, nunca vê a palavra "Tailscale".
+
+**Ainda falta pra fechar de ponta a ponta:**
+- Testar o fluxo `join_tailnet_as_guest` completo numa máquina Windows real (instalar +
+  entrar na tailnet + conectar na sala) — só validamos a Rota B (host) e o microserviço
+  isoladamente até aqui, não o caminho inteiro do cliente junto.
+- A tela "conectando..." do `LobbyScreen.tsx` não diferencia "instalando Tailscale" de
+  "conectando no lobby" — mesmo spinner genérico pros dois, pode parecer travado se a
+  instalação demorar. Melhoria de UX, não bloqueante.
+- `InternetSettings.tsx` continua escrita 100% do ponto de vista do host — se o próprio
+  amigo abrir essa tela (em vez de passar direto pelo fluxo automático do "Cliente"), o texto
+  vai soar estranho. Adiado por decisão do Bruno (13/08/2026).
 
 **Depende de:** #006 (motivação e IP local/público já resolvidos) — nada bloqueante além
 disso, mas é bastante trabalho novo de infraestrutura (microserviço externo, pipeline de

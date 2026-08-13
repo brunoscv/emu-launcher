@@ -87,6 +87,15 @@ export function LobbyScreen({ mode, game, onClose }: Props) {
     try {
       const host = mode === "host" ? await invoke<string>("resolve_lobby_host") : hostOverride.trim();
       if (!host) throw new Error("Informe o IP de quem está hospedando.");
+
+      // Endereço 100.x.x.x só existe dentro de uma tailnet — nesse caso o
+      // amigo precisa entrar nela primeiro (IDEAS.md #021), sem precisar
+      // saber que isso existe. IP de LAN (192.168.x.x) ou público normal
+      // não passa por aqui, conecta direto como sempre.
+      if (mode === "client" && host.startsWith("100.")) {
+        await invoke("join_tailnet_as_guest");
+      }
+
       setResolvedHost(host);
       connect(host);
     } catch (e) {

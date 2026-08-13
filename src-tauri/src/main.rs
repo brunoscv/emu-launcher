@@ -28,7 +28,9 @@ use settings::{
     save_dedicated_server_host, save_public_host_address,
 };
 use systems::list_systems;
-use tailscale_install::{ensure_tailscale_installed, is_tailscale_installed, start_tailscale_login};
+use tailscale_install::{
+    ensure_tailscale_installed, is_tailscale_installed, join_tailnet_as_guest, start_tailscale_login,
+};
 
 fn main() {
     // .env vive na raiz do projeto (um nível acima do Cargo.toml, em
@@ -91,6 +93,7 @@ fn main() {
             is_tailscale_installed,
             ensure_tailscale_installed,
             start_tailscale_login,
+            join_tailnet_as_guest,
             write_keyboard_config,
             kill_emulator,
             open_retroarch
