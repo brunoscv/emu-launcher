@@ -25,12 +25,17 @@ export function InternetSettings({ onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tailscaleIp, setTailscaleIp] = useState<string | null>(null);
+  const [tailscaleChecked, setTailscaleChecked] = useState(false);
 
   useEffect(() => {
     invoke<string>("get_local_lan_ip")
       .then(setLocalIp)
       .catch((e) => setError(String(e)));
     invoke<string | null>("get_public_host_address").then((addr) => setPublicAddress(addr ?? ""));
+    invoke<string | null>("get_tailscale_ip")
+      .then(setTailscaleIp)
+      .finally(() => setTailscaleChecked(true));
   }, []);
 
   async function handleSave() {
@@ -164,6 +169,59 @@ export function InternetSettings({ onClose }: Props) {
       </section>
 
       <section className="internet-settings__section">
+        <h3>6. Deu CGNAT? Usa o Tailscale</h3>
+        <p className="internet-settings__hint">
+          Se o teste do passo 5 deu porta fechada e o IP da WAN no painel do roteador é
+          diferente do IP público que você vê em sites tipo "qual meu IP" (ou está na faixa{" "}
+          <code>100.64.x.x</code>–<code>100.127.x.x</code>), é CGNAT — a operadora compartilha
+          teu IP público com outras casas, então nenhuma regra de port-forward resolve. O
+          <strong> Tailscale</strong> contorna isso criando uma rede virtual direto entre as
+          máquinas, sem depender de porta aberta no roteador.
+        </p>
+
+        {!tailscaleChecked ? (
+          <p className="internet-settings__hint">Verificando se o Tailscale está instalado...</p>
+        ) : tailscaleIp ? (
+          <>
+            <p>
+              Tailscale rodando, IP desta máquina na tailnet:{" "}
+              <span className="internet-settings__mono internet-settings__ip">{tailscaleIp}</span>
+            </p>
+            <button
+              className="btn-scan"
+              onClick={() => setPublicAddress(tailscaleIp)}
+              disabled={publicAddress === tailscaleIp}
+            >
+              Usar esse IP no campo do passo 4
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="internet-settings__hint">
+              Tailscale não detectado nesta máquina. Instalação no Linux (pede confirmação de
+              senha do sistema, então precisa rodar você mesmo num terminal):
+            </p>
+            <pre className="internet-settings__code">
+              curl -fsSL https://tailscale.com/install.sh | sh{"\n"}sudo tailscale up
+            </pre>
+            <p className="internet-settings__hint">
+              O segundo comando abre uma página no navegador pra logar (conta Google/Microsoft/
+              GitHub, é grátis pra uso pessoal). Depois disso, volta nessa tela — o IP some
+              daqui automaticamente.
+            </p>
+          </>
+        )}
+
+        <p className="internet-settings__hint">
+          O amigo também precisa instalar o Tailscale e entrar na <strong>mesma tailnet</strong>{" "}
+          — no painel <code>login.tailscale.com/admin/users</code> tem a opção de convidar por
+          e-mail. Sem isso, as duas máquinas ficam em redes virtuais separadas e não se
+          enxergam. Depois dos dois conectados, é só usar o IP <code>100.x.x.x</code> do host
+          no lugar do IP público, no campo do passo 4.
+        </p>
+      </section>
+
+      <section className="internet-settings__section">
         <h3>E o lado do seu amigo?</h3>
         <p className="internet-settings__hint">
           Só precisa disso tudo quem vai <strong>hospedar</strong> (clicar "Host"). Quem só
@@ -252,6 +310,18 @@ export function InternetSettings({ onClose }: Props) {
 
         .internet-settings__mono {
           font-family: var(--font-mono);
+        }
+
+        .internet-settings__code {
+          background: var(--bg-panel);
+          border: 1px solid var(--border-soft);
+          border-radius: var(--radius-sm);
+          padding: 0.6rem 0.8rem;
+          font-family: var(--font-mono);
+          font-size: 0.8rem;
+          color: var(--accent-teal);
+          overflow-x: auto;
+          margin: 0 0 0.5rem;
         }
 
         .internet-settings__ip {

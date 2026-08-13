@@ -242,28 +242,54 @@ baixo (15ms, mesma rede).
 
 ## 🔧 #006 — Acesso pela internet pro servidor de lobby
 
-**Registrada em:** 10/08/2026
+**Registrada em:** 10/08/2026 · **CGNAT confirmado + Tailscale (detecção) implementado em:**
+13/08/2026 (branch `EMU-001`).
 
 **A ideia:** os amigos vão estar em casas diferentes, não na mesma rede do Bruno — então o
 servidor (lobby + RetroArch headless de #005) precisa ser alcançável pela internet, não só
 na LAN.
 
-### Plano técnico inicial
+### O que foi confirmado na prática
 
-1. **Caminho preferido:** port-forward no roteador do Bruno (onde o PC dedicado vive) +
-   DNS dinâmico (DDNS), já que é a rede que ele controla — do lado do amigo, só precisa de
-   um endereço pra digitar, nada extra pra instalar.
-2. **Plano B:** VPN tipo Tailscale/WireGuard conectando todas as máquinas numa rede
-   virtual, se a NAT do Bruno ou de algum amigo impedir port-forward direto (CGNAT de
-   operadora, por exemplo, é comum em conexão residencial e mata a opção 1 de cara — vale
-   checar isso antes de investir na opção 1).
-3. Decisão final entre as duas fica pra quando chegar nessa fase, com teste real de
-   latência/conectividade nas duas pontas.
+Bruno liberou as portas 7777 (lobby) e 55435 (netplay) no roteador, mas o teste externo
+(`check-host.net`) deu timeout — porta não alcançável de fora, mesmo com o app escutando
+certinho em `0.0.0.0:7777` (confirmado via `ss -tlnp`, não era bug do app). Causa raiz: IP
+da WAN no painel do roteador é `100.106.168.17` — dentro da faixa `100.64.0.0/10` (RFC 6598,
+reservada especificamente pra CGNAT), enquanto o IP público "visível" (`201.18.109.66`, via
+`ipify`/`ifconfig.me`) é o IP do NAT da operadora (Nio), compartilhado entre várias casas.
+**Port-forward não funciona nesse cenário, ponto final** — não é configuração errada de
+regra, é a operadora nunca entregar o tráfego pro roteador do Bruno pra começo de conversa.
+
+Isso confirma o "Plano B" do plano original como o caminho **real** pro caso do Bruno, não
+mais uma alternativa hipotética.
+
+### Implementado
+
+1. **`get_tailscale_ip` (Rust, `settings.rs`)** — roda `tailscale ip -4` e retorna o IP da
+   tailnet (faixa `100.x.x.x`, não confundir com a faixa de CGNAT apesar de visualmente
+   parecida) ou `None` se não instalado/conectado. Não tenta instalar nem rodar
+   `tailscale up` sozinho — pede autenticação interativa (abre navegador), fora do alcance
+   de um command Tauri chamado de dentro da UI.
+2. **`InternetSettings.tsx`** — nova seção "Deu CGNAT? Usa o Tailscale": mostra o IP da
+   tailnet com botão pra preencher automaticamente o campo de endereço público (mesmo campo
+   que hoje serve pra IP público/DDNS — Tailscale é só mais um tipo de valor válido ali), ou
+   as instruções de instalação (`curl ... | sh` + `sudo tailscale up`) se não detectado.
+   Explica que o amigo também precisa Tailscale + entrar na mesma tailnet (convite por
+   e-mail no painel `login.tailscale.com/admin/users`) — isso não dá pra automatizar, é
+   passo manual de cada lado.
+3. **Não mudou nada no lobby/`server.rs`** — o binding já era `0.0.0.0:7777` (todas as
+   interfaces), então tráfego chegando pela interface virtual do Tailscale já cai direto
+   nele. A única peça que faltava era descobrir/mostrar o IP certo pra UI.
+
+**Ainda pendente:** instalar o Tailscale de fato nesta máquina (pede senha de sistema,
+Bruno precisa rodar manualmente) e validar ponta a ponta com um amigo de verdade numa rede
+diferente — o que existe até aqui é a detecção/UI, não um teste real de conectividade via
+Tailscale ainda.
 
 **Depende de:** #005 (o servidor de fato hospedando alguma coisa que valha a pena expor).
 
 **Critério de sucesso:** o mesmo teste de sucesso do #005, mas com o amigo conectando de
-fora da rede do Bruno.
+fora da rede do Bruno, via Tailscale.
 
 ---
 
@@ -1045,6 +1071,214 @@ executável sozinho, sem core, sem rom, sem `--appendconfig` nenhum. Botão "Abr
 RetroArch" na tela "⌨ Teclado", numa seção nova explicando a alternativa.
 
 **Depende de:** nada bloqueante — é um caminho paralelo ao #009, não substitui.
+
+---
+
+## 🔧 #021 — Tailscale embutido e invisível (zero instalação visível pro amigo)
+
+**Registrada em:** 13/08/2026 · **Rota A validada com protótipo isolado em:** 13/08/2026 (TCP
+e UDP funcionando de ponta a ponta com um node `tsnet` embutido — ver detalhes abaixo).
+
+**Contexto:** motivada pelo CGNAT confirmado no #006 (operadora Nio do Bruno) — port-forward
+está descartado de vez, IP da WAN (`100.106.168.17`) cai na faixa reservada `100.64.0.0/10`
+(RFC 6598). O caminho de contorno é VPN mesh (Tailscale), mas com um requisito extra que o
+#006/#017 não cobria: os até 5 amigos do grupo **não podem precisar instalar nem configurar
+nada por fora da nossa aplicação** — nem o Tailscale, nem criar conta nele manualmente.
+Comparado com playit.gg (túnel centralizado): descartado por ter latência maior esperada
+(tráfego sempre passa pelo relay deles), inviável pra netplay de SNES sensível a frame — ver
+decisão no #006. Sem pressa nenhuma pra colocar isso no ar; prioridade é funcionar de
+verdade, não economizar trabalho de implementação.
+
+### Pesquisa feita (13/08/2026) — duas rotas candidatas
+
+**Rota A — Tailscale embutido via `tsnet` (linha mais promissora):** `tsnet` é a forma da
+própria Tailscale de rodar um nó completo **dentro do processo**, sem depender de serviço
+do sistema nem de driver TUN — userspace puro (stack de rede gVisor rodando só dentro do
+nosso binário). Isso muda o design todo: em vez de "instalar o Tailscale silenciosamente"
+(que ainda pede elevação/admin no Windows por causa do driver), a gente **nunca instala
+nada**, só linka a biblioteca no nosso próprio executável. Duas formas de chegar nisso em
+Rust:
+- `tailscale-rs` (oficial, mantido pela própria Tailscale) — mas o próprio repositório se
+  descreve como "unstable and insecure", não recomendado pra produção ainda (preview).
+- crate `tsnet` de `passcod/libtailscale` — wrapper Rust (FFI) em cima do `libtailscale`
+  (C, esse sim mantido oficialmente pela Tailscale). Mais promissor, mas ainda `0.1.0`
+  early-stage, e o build depende de ter o **toolchain Go instalado** (cross-compile
+  Go→C dentro do processo de build Rust) — pesa no pipeline do GitHub Actions, mas é
+  contornável (runner com Go configurado).
+
+**Limitação real confirmada:** processos separados na mesma máquina (ex: o RetroArch, que é
+um executável à parte, só recebe `spawn` nosso) **não enxergam** a rede virtual do tsnet
+sozinhos — só o processo que embutiu o tsnet consegue discar/escutar nela. Isso não mata a
+ideia, mas muda o desenho: nosso app vira um **proxy** — escuta na rede tsnet (porta 7777 do
+lobby, 55435 TCP/UDP do netplay) e repassa pra `127.0.0.1:<porta>` onde o RetroArch local
+está de verdade escutando, nos dois sentidos. O RetroArch nunca precisa saber que Tailscale
+existe. UDP é suportado por `tsnet` (`tsnet.Server.ListenPacket`, confirmado na doc oficial
+em Go) — mas não confirmei se o wrapper Rust (`libtailscale`) expõe esse mesmo recurso, só
+TCP está certo por enquanto. **Isso precisa ser testado na prática antes de qualquer coisa.**
+
+**Rota B — Bundle do `tailscale.exe`/`tailscaled` reais (fallback comprovado):** mesma ideia
+que veio da conversa com o Gemini, só que com o comando certo — `tailscale.exe
+install-system-daemon` **não existe** (conferido rodando `tailscale --help` no binário real
+instalado aqui: não está na lista real de subcomandos). O caminho real e documentado é
+instalar via MSI em modo silencioso: `msiexec /i tailscale-setup-X.msi /quiet /norestart` —
+isso instala o WinTun (driver de rede) e registra o `tailscaled` como serviço do Windows.
+**Ainda pede elevação/UAC**, mas dá pra embutir esse UAC dentro do próprio instalador do
+nosso app (também MSI/WiX) — pro amigo, vira só "autoriza a instalação do jogo", sem
+aparecer o nome "Tailscale" na tela. É o caminho maduro/testado em produção por outras
+empresas (existem scripts de deploy corporativo prontos, ex:
+`hellocharli/tailscale-unattended` no GitHub), contra a Rota A que é experimental.
+
+### Geração automática da auth key (sem o amigo clicar em "autorizar")
+
+Confirmado: dá pra gerar auth key **programaticamente**, sem o fluxo de navegador. Cria-se
+um **OAuth client** (client ID + secret) no painel do Tailscale, com escopo `auth_keys`; um
+servidor nosso troca esse client credentials por um token de curta duração e chama a API do
+Tailscale pra emitir uma auth key nova (de preferência **efêmera**, `--ephemeral`, pra sair
+sozinha da tailnet quando o amigo desconecta, sem acumular dispositivo fantasma). O app
+então roda `tailscale up --authkey=<key> --accept-dns=false` (ou o equivalente via
+`tsnet.Server` na Rota A) sem nenhuma tela de login aparecer.
+
+**Importante:** o client secret do OAuth **não pode** ir embutido no instalador (qualquer um
+descompila e rouba acesso à tailnet inteira). Precisa de um microserviço nosso guardando
+esse segredo — Bruno já tem conta Vercel e domínio de programação, então dá pra ser uma
+function serverless simples (Node ou equivalente) com um endpoint tipo `POST /mint-key`,
+autenticado de algum jeito mínimo (nem que seja um token fixo embutido no app — bem menos
+grave que vazar o client secret real, porque um token vazado só gera keys efêmeras de
+convidado, não dá acesso administrativo à tailnet).
+
+### Isolamento dos convidados (ACL/tags)
+
+Confirmado: Tailscale tem **tags** — um dispositivo de amigo entraria com `tag:guest`, e uma
+regra de ACL restringe esse tag a só alcançar `tag:host` nas portas 7777/55435, nunca outros
+dispositivos pessoais do Bruno que estejam na mesma tailnet (ex: NAS, PC de trabalho). Sem
+isso, todo amigo convidado teria acesso de rede a **tudo** na tailnet por padrão (Tailscale
+é "permite tudo entre membros" até alguém restringir).
+
+### Limites do plano grátis ("Personal")
+
+Confirmado na página oficial de preços: até **6 usuários**, dispositivos de usuário
+ilimitados, até **50 recursos taggeados** (`tag:host` + `tag:guest` não chega perto disso),
+até **3 grupos de ACL**, e **1.000 minutos-recurso efêmero por mês** — esse último é o único
+que merece atenção: se sessões com `--ephemeral` contarem contra essa cota, uso frequente ao
+longo do mês pode esbarrar nela. Não confirmado se "recurso efêmero" nesse contexto de
+billing é o mesmo conceito do nó efêmero pessoal — verificar com conta de teste antes de
+depender disso a longo prazo.
+
+### O que foi testado na prática (13/08/2026) — Rota A funciona
+
+Protótipo isolado em `~/Sites/projetos/tsnet-prototype` (fora do repo principal, não
+versionado), crate `tsnet` de `passcod/libtailscale`, resultados reais:
+
+- **Build só funciona com Go 1.21.0 exato — Go 1.23 (o mais novo) quebra.** O `gvisor`
+  vendorizado (dependência da Tailscale, snapshot de 2023) usa `//go:linkname` pra acessar
+  símbolos internos do runtime do Go (`goready`, `gopark`, `semacquire`...) que mudaram nas
+  versões mais novas. Isso é um requisito real e rígido pro pipeline: o GitHub Actions
+  precisa fixar Go **1.21.x**, não "a versão mais nova disponível" — do jeito que já fixamos
+  o RetroArch em `1.18.0` no #003, mesma lógica.
+- **O node embutido entra na tailnet de verdade, sem instalar nada.** Rodou o binário Rust
+  isolado, ele gerou uma URL de login real (`login.tailscale.com/a/...`), o Bruno autorizou
+  no navegador, e o dispositivo `tsnet-prototype` apareceu no `tailscale status` da conta
+  real, com IP próprio (`100.90.16.100`) — sem `apt install`, sem serviço do sistema, sem
+  driver, tudo dentro do processo do nosso próprio binário.
+- **TCP e UDP os dois funcionam de ponta a ponta.** Testado com `nc`/`nc -u` de outra máquina
+  na mesma tailnet (o cliente Tailscale normal deste PC) contra o listener do protótipo —
+  os dois ecoaram de volta corretamente. Isso desmente (na prática, pelo menos nesse teste)
+  o aviso do próprio código-fonte de que "UDP currently not really tested" — funcionou, mas
+  como o aviso é dos mantenedores originais, vale continuar tratando como não-garantido até
+  um teste real com o netplay do RetroArch de verdade (não só um echo).
+- **Reautenticação é instantânea** — o estado fica salvo (`~/.config/tsnet-<hostname>/`), e
+  reiniciar o processo depois de já ter logado uma vez não pede login de novo. Bom sinal pro
+  caso real, onde o app do amigo ficaria aberto e fechado repetidas vezes.
+- **`netcheck` interno reportou `udp=true`, `hair=true` e conexão ao relay DERP de São Paulo
+  em ~55-90ms** — isso é o teste "de casa pra casa" mais próximo que dava pra fazer sozinho
+  (localhost mesmo, então não prova NAT traversal real entre duas redes CGNAT diferentes),
+  mas confirma que a infraestrutura básica de rede da Tailscale está saudável a partir daqui.
+- **Gap confirmado:** a API Rust (`tsnet` crate) não expõe nenhuma função de "pegar meu IP"
+  ou "status" — o `tailscale.h` por baixo só tem `dial`/`listen`/`accept`/`loopback`. Pra
+  mostrar o IP da tailnet na UI (como já fizemos em `get_tailscale_ip` pro caminho normal),
+  vai precisar implementar isso na mão via `tailscale_loopback` (API local HTTP) — trabalho
+  de engenharia real, não é `get_ip()` de graça.
+- **Build musl estático (pra rodar sem risco de versão de glibc numa segunda máquina) deu
+  segfault na primeira tentativa**, num notebook mais antigo (CPU Ivy Bridge ~2013, tem
+  `avx` mas não `avx2` — não parece ser a causa, já que nem Go nem Rust exigem `avx2` por
+  padrão). Suspeita mais forte: **linkagem estática do runtime do Go contra musl é uma
+  combinação conhecida por ser frágil** (o runtime do Go tem premissas sobre threading/sinal
+  que casam melhor com glibc) — a build dinâmica normal (mesma usada no teste bem-sucedido
+  acima) não teve esse problema. Compilar nativamente em cada máquina (Rust+Go instalados
+  ali, build dinâmico contra o glibc local) contornou o crash. **Risco real da Rota A**: se o
+  plano de distribuição final depender de builds estáticas multi-plataforma, esse bug volta
+  a aparecer — precisa investigar mais a fundo ou assumir que cada instalação compila/baixa
+  um binário dinâmico específico pro SO+arquitetura do usuário (como já fazemos com o
+  RetroArch no #003).
+- **Teste entre duas redes diferentes de verdade (casa com CGNAT + hotspot de celular):
+  tentado, resultado promissor mas não confiável.** Um notebook Linux (Bodhi) foi levado pro
+  hotspot do celular, compilou o protótipo nativamente ali (contornando o bug do musl acima)
+  e entrou na mesma tailnet. Um `tailscale ping` e testes de TCP/UDP reais (`nc`/`nc -u`)
+  nesse momento retornaram sucesso com **conexão direta (sem relay DERP) via IPv6, ~9ms**.
+  Isso seria uma confirmação forte — só que o Wi-Fi do notebook reconectou sozinho na rede de
+  casa logo em seguida (comportamento automático do NetworkManager dele), e não dá pra
+  garantir com certeza em qual rede ele estava exatamente no instante dos testes de sucesso.
+  **Vale registrar também:** mesmo que o resultado se confirme, o caminho direto foi via
+  IPv6 (que não passa por CGNAT, é roteável globalmente) — isso não prova necessariamente que
+  duas redes **IPv4-only** atrás de CGNAT conseguiriam o mesmo furo direto; só prova que,
+  quando IPv6 está disponível dos dois lados (comum em operadora residencial e móvel no
+  Brasil hoje), a Tailscale prefere e consegue esse caminho mais fácil. **Repetir esse teste
+  com uma conexão de internet móvel estável** é o próximo passo pendente antes de declarar a
+  Rota A validada de ponta a ponta.
+- **Não testado ainda:** fluxo com `--authkey` não-interativo (só confirmado que o método
+  existe na API, não rodado ainda), e build pra Windows (cross-compile do Go/cgo a partir de
+  um runner Linux é historicamente instável — pode forçar runner Windows nativo no GitHub
+  Actions).
+
+**Conclusão parcial:** Rota A é tecnicamente viável — não é só teoria, o node embutido
+conecta e transporta TCP+UDP de verdade, inclusive (com bastante confiança, mas não 100%
+certeza) atravessando duas redes diferentes de fato. O bug do musl é o achado mais
+importante dessa rodada de testes: muda a estratégia de distribuição (compilar/baixar
+binário nativo por SO, não um estático universal). Segue como caminho principal; a Rota B
+continua documentada como fallback caso o teste real entre duas redes diferentes (repetir
+quando a internet móvel estiver estável) ou o
+build de Windows travem.
+
+### Plano faseado
+
+1. ~~Protótipo isolado confirmando build + TCP/UDP básico~~ — feito, ver seção acima.
+2. **Próximo:** repetir o teste de conectividade com uma segunda máquina numa rede diferente
+   (peça pro amigo rodar o mesmo binário, ou usar um celular em dados móveis como "rede 2")
+   — isso testa NAT traversal de verdade entre dois CGNATs, não só localhost.
+3. **Se esse teste falhar ou o build de Windows travar:** cai pra Rota B (bundle do binário
+   real + instalador MSI com WinTun) como plano validado.
+4. **Microserviço de auth key na Vercel** — endpoint mínimo, client OAuth criado no painel do
+   Tailscale, testar geração de key efêmera de ponta a ponta antes de plugar no app.
+5. **Implementar leitura de IP/status via `tailscale_loopback`** — gap confirmado acima, sem
+   isso a UI não sabe o que mostrar pro usuário.
+6. **ACL da tailnet** — configurar `tag:host`/`tag:guest` e a regra de isolamento antes de
+   convidar o primeiro amigo de verdade.
+7. **Integração final no app** — reaproveita a UI já existente do #006/#017
+   (`InternetSettings.tsx`), mas troca o fluxo manual por um botão único tipo "Convidar
+   amigo" que já resolve tudo sem precisar da tela de "abre o painel do roteador".
+
+**Depende de:** #006 (motivação e IP local/público já resolvidos) — nada bloqueante além
+disso, mas é bastante trabalho novo de infraestrutura (microserviço externo, pipeline de
+build com Go), não é uma tarde de trabalho como as ideias menores deste arquivo.
+
+**Critério de sucesso:** um amigo em outra cidade, numa rede CGNAT dele também, abre nosso
+instalador, clica "Jogar" numa sala que o Bruno criou, e o RetroArch conecta — sem nunca ter
+ouvido a palavra "Tailscale", sem UAC de driver de rede separado da tela de instalação do
+nosso próprio app, sem digitar IP nem código de convite manual de rede.
+
+**Riscos em aberto:**
+- Rota A é experimental — pode não vingar; sem o protótipo testado não tem como prometer
+  prazo nem garantir que substitui a Rota B.
+- Cross-compile Go dentro do pipeline Rust (Rota A) é conhecido por ser chato, especialmente
+  pra Windows a partir de um runner Linux — pode forçar runner nativo Windows no GitHub
+  Actions (mais lento/caro, mas disponível).
+- CGNAT nos dois lados ao mesmo tempo (Bruno + amigo) pode falhar o "furo" de NAT direto do
+  Tailscale e cair pro relay dele (DERP) — ainda bem melhor que nenhuma conexão, mas não é
+  "quase zero lag garantido" como o resumo do Gemini deu a entender. Precisa validar com
+  `tailscale status`/`tailscale netcheck` num teste real entre duas redes CGNAT antes de
+  declarar sucesso.
+- Cota de "minutos-recurso efêmero" do plano grátis (1.000/mês) — não confirmado se afeta
+  esse uso; verificar com conta de teste antes de depender disso a longo prazo.
 
 ---
 

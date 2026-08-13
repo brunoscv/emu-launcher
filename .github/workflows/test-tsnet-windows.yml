@@ -1,0 +1,149 @@
+name: Teste isolado - tsnet no Windows
+
+# Disparo manual só — isso não é parte do build de verdade (ver build-windows.yml),
+# é só pra responder uma pergunta técnica em aberto do IDEAS.md #021: o crate
+# `tsnet` (embute o Tailscale via cgo/Go) builda e roda no Windows sem crashar?
+# A dúvida real é ABI: Rust no Windows usa MSVC por padrão, mas o cgo do Go
+# tradicionalmente quer um compilador estilo GCC (MinGW) — os dois jobs abaixo
+# testam as duas combinações possíveis (Rust-MSVC+MinGW-só-pro-Go, e Rust-GNU
+# consistente) porque não dá pra saber qual funciona sem tentar de verdade.
+on:
+  workflow_dispatch:
+
+jobs:
+  msvc-with-mingw-for-cgo:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21.0"
+
+      # Rust default no Windows já é x86_64-pc-windows-msvc, não precisa de toolchain extra.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Go precisa de "gcc" no PATH pra fazer `go build -buildmode=c-archive`
+      # (cgo não fala com cl.exe/MSVC diretamente) — instala só pra isso, o
+      # Rust em si continua compilando com MSVC.
+      - name: Instala MinGW-w64 (só pro cgo do Go usar)
+        run: choco install mingw -y
+
+      - name: Cria crate de teste isolado
+        shell: bash
+        run: |
+          cargo new --bin tsnet_wintest
+          cd tsnet_wintest
+          cat >> Cargo.toml << 'EOF'
+          tsnet = { version = "0.1.0", git = "https://github.com/passcod/libtailscale" }
+          EOF
+          cat > src/main.rs << 'EOF'
+          use tsnet::ServerBuilder;
+
+          fn main() {
+              println!("subindo node tsnet de teste (MSVC + MinGW-pro-cgo)...");
+              let _ts = ServerBuilder::new()
+                  .hostname("ci-wintest-msvc")
+                  .ephemeral()
+                  .redirect_log()
+                  .build()
+                  .expect("falhou ao subir o node tsnet");
+              println!("node subiu sem crashar — build/link/ABI estao OK");
+              // Sem authkey, o node fica esperando login interativo pra sempre.
+              // O que importa aqui e so confirmar que nao segfaultou ao iniciar
+              // o runtime do Go embutido - por isso o timeout no passo seguinte.
+              std::thread::sleep(std::time::Duration::from_secs(15));
+          }
+          EOF
+
+      - name: Builda
+        shell: bash
+        working-directory: tsnet_wintest
+        run: cargo build
+
+      - name: Roda por alguns segundos (o que importa e nao crashar)
+        shell: bash
+        working-directory: tsnet_wintest
+        run: |
+          timeout 20 ./target/debug/tsnet_wintest.exe
+          code=$?
+          # timeout mata com 124 (ainda rodando, esperando login) - isso e SUCESSO.
+          # qualquer outro codigo (ex: crash/access violation) e falha real.
+          if [ "$code" -eq 124 ] || [ "$code" -eq 0 ]; then
+            echo "OK: node rodou sem crashar (codigo $code)"
+            exit 0
+          else
+            echo "FALHOU: processo morreu com codigo $code (provavel crash)"
+            exit 1
+          fi
+
+      - name: Publica o binario pra teste manual depois
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsnet-wintest-msvc
+          path: tsnet_wintest/target/debug/tsnet_wintest.exe
+          if-no-files-found: warn
+
+  gnu-target-consistente:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21.0"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Instala MinGW-w64 (Rust GNU e o cgo do Go usam o mesmo toolchain aqui)
+        run: choco install mingw -y
+
+      - name: Cria crate de teste isolado
+        shell: bash
+        run: |
+          cargo new --bin tsnet_wintest
+          cd tsnet_wintest
+          cat >> Cargo.toml << 'EOF'
+          tsnet = { version = "0.1.0", git = "https://github.com/passcod/libtailscale" }
+          EOF
+          cat > src/main.rs << 'EOF'
+          use tsnet::ServerBuilder;
+
+          fn main() {
+              println!("subindo node tsnet de teste (Rust-GNU + MinGW, ABI consistente)...");
+              let _ts = ServerBuilder::new()
+                  .hostname("ci-wintest-gnu")
+                  .ephemeral()
+                  .redirect_log()
+                  .build()
+                  .expect("falhou ao subir o node tsnet");
+              println!("node subiu sem crashar — build/link/ABI estao OK");
+              std::thread::sleep(std::time::Duration::from_secs(15));
+          }
+          EOF
+
+      - name: Builda (target x86_64-pc-windows-gnu)
+        shell: bash
+        working-directory: tsnet_wintest
+        run: cargo build --target x86_64-pc-windows-gnu
+
+      - name: Roda por alguns segundos (o que importa e nao crashar)
+        shell: bash
+        working-directory: tsnet_wintest
+        run: |
+          timeout 20 ./target/x86_64-pc-windows-gnu/debug/tsnet_wintest.exe
+          code=$?
+          if [ "$code" -eq 124 ] || [ "$code" -eq 0 ]; then
+            echo "OK: node rodou sem crashar (codigo $code)"
+            exit 0
+          else
+            echo "FALHOU: processo morreu com codigo $code (provavel crash)"
+            exit 1
+          fi
+
+      - name: Publica o binario pra teste manual depois
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsnet-wintest-gnu
+          path: tsnet_wintest/target/x86_64-pc-windows-gnu/debug/tsnet_wintest.exe
+          if-no-files-found: warn
