@@ -1,5 +1,6 @@
 use crate::db;
 use std::net::UdpSocket;
+use std::process::Command;
 
 const DEDICATED_SERVER_HOST_KEY: &str = "dedicated_server_host";
 const PUBLIC_HOST_ADDRESS_KEY: &str = "public_host_address";
@@ -96,4 +97,29 @@ pub fn get_local_lan_ip() -> Result<String, String> {
         .local_addr()
         .map(|addr| addr.ip().to_string())
         .map_err(|e| e.to_string())
+}
+
+/// IP do Tailscale desta máquina (faixa `100.x.x.x`), pra tela "Jogar pela
+/// Internet" oferecer como alternativa quando port-forward não é viável
+/// (CGNAT de operadora, ver IDEAS.md #006/#018 — confirmado na prática pro
+/// Bruno com a operadora Nio). `None` cobre tanto "não instalado" quanto
+/// "instalado mas não logado/conectado" — não faz sentido diferenciar os dois
+/// casos aqui, os dois levam ao mesmo texto de instrução na UI. Não tenta
+/// instalar nem configurar nada sozinho: `tailscale up` pede autenticação
+/// interativa (abre navegador), fora do alcance de um command Tauri.
+#[tauri::command]
+pub fn get_tailscale_ip() -> Result<Option<String>, String> {
+    let output = match Command::new("tailscale").arg("ip").arg("-4").output() {
+        Ok(o) => o,
+        Err(_) => return Ok(None),
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if ip.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(ip))
+    }
 }
