@@ -134,6 +134,75 @@ async fn download_installer(url: &str, dest: &PathBuf, app: &tauri::AppHandle) -
     Ok(())
 }
 
+/// Dispara o login do Tailscale (`tailscale up`, sem authkey — fluxo
+/// interativo de verdade, mesmo enquanto o microserviço de auth key da
+/// Vercel não existe, ver IDEAS.md #021). Instalar (`ensure_tailscale_installed`)
+/// não loga sozinho — essa etapa é separada de propósito, porque descobrimos
+/// na prática (13/08/2026, teste do Bruno) que a tela ficava presa num
+/// estado confuso "instalado, mas nem detectado nem com erro" quando as
+/// duas coisas ficavam misturadas numa checagem só.
+///
+/// Não espera o `tailscale up` terminar (ele fica bloqueado até alguém
+/// autenticar no navegador, ou pra sempre se ninguém autenticar) — só lê a
+/// saída dele numa tarefa em segundo plano até achar a URL de login, abre
+/// no navegador padrão via `open::that`, e também emite um evento
+/// `tailscale-login-url` pro front-end mostrar a URL como link clicável de
+/// reforço (caso abrir o navegador sozinho falhe por algum motivo).
+#[tauri::command]
+pub async fn start_tailscale_login(app: tauri::AppHandle) -> Result<(), String> {
+    use std::process::Stdio;
+    use tokio::io::BufReader;
+
+    require_windows()?;
+
+    let mut child = tokio::process::Command::new("tailscale")
+        .arg("up")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("não consegui iniciar 'tailscale up': {e}"))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let app_clone = app.clone();
+
+    tokio::spawn(async move {
+        // A URL de login pode sair no stdout ou no stderr dependendo da
+        // versão — lê os dois em paralelo, o primeiro que achar vence.
+        let mut lines = Vec::new();
+        if let Some(out) = stdout {
+            lines.push(tokio::spawn(watch_for_login_url(BufReader::new(out), app_clone.clone())));
+        }
+        if let Some(err) = stderr {
+            lines.push(tokio::spawn(watch_for_login_url(BufReader::new(err), app_clone)));
+        }
+        for l in lines {
+            let _ = l.await;
+        }
+        // Não mata o processo — `tailscale up` some sozinho quando o login
+        // termina (ou fica esperando, sem problema, é só um processo leve).
+        let _ = child.wait().await;
+    });
+
+    Ok(())
+}
+
+async fn watch_for_login_url<R: tokio::io::AsyncRead + Unpin>(
+    reader: tokio::io::BufReader<R>,
+    app: tauri::AppHandle,
+) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = reader.lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if let Some(idx) = line.find("https://login.tailscale.com") {
+            let url = line[idx..].trim().to_string();
+            let _ = open::that(&url);
+            let _ = app.emit("tailscale-login-url", url);
+            return;
+        }
+    }
+}
+
 /// `runas::Command` dispara a mesma janela de UAC que aparece ao clicar
 /// "Executar como administrador" — só nesse processo filho (`msiexec`), o
 /// nosso app continua rodando sem privilégio nenhum antes e depois disso.
