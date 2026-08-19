@@ -19,6 +19,42 @@ const TAILSCALE_VERSION: &str = "1.102.2";
 const MINT_KEY_URL: &str = "https://emu-launcher-vq6y.vercel.app/api/mint-key";
 const MINT_KEY_SHARED_SECRET: &str = "584d0fc52b61e63e75ac57e8dd47f0dd190fa29833ea582b5b689de148ccb5f3";
 
+/// `tailscale.exe` é um executável de console — sem isso, toda vez que
+/// nosso app (subsistema "windows", sem console próprio) o spawna, o
+/// Windows abre uma janela de console nova pra ele, que fica "piscando" na
+/// barra de tarefas sem ganhar foco (o processo que disparou está em
+/// segundo plano, então a nova janela esbarra na trava de foreground-stealing
+/// do Windows). Foi exatamente o "algo pisca na barra de tarefas" que o
+/// Bruno viu testando o login numa máquina Windows de verdade (19/08/2026)
+/// — não era o navegador (esse abre à parte, via `open::that`), era essa
+/// janela de console vazia do `tailscale up`/`tailscale ip` em si. Suprimir
+/// não afeta o processo nem sua saída — stdout/stderr continuam sendo
+/// capturados normalmente via pipe.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+pub(crate) fn suppress_console_window(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(CREATE_NO_WINDOW)
+}
+#[cfg(not(windows))]
+pub(crate) fn suppress_console_window(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    cmd
+}
+
+#[cfg(windows)]
+fn suppress_console_window_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process::Command {
+    // `tokio::process::Command::creation_flags` é método próprio dele (não
+    // vem do trait `std::os::windows::process::CommandExt`), então não
+    // precisa importar nada extra aqui.
+    cmd.creation_flags(CREATE_NO_WINDOW)
+}
+#[cfg(not(windows))]
+fn suppress_console_window_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process::Command {
+    cmd
+}
+
 /// Só Windows por enquanto (IDEAS.md #021 — decisão do Bruno de focar no
 /// Windows primeiro, já que é o que os amigos usam; Linux fica pra depois,
 /// com a Rota A embutida que já validamos separadamente). Chamar isso em
@@ -41,6 +77,22 @@ fn known_install_path() -> Option<PathBuf> {
     Some(PathBuf::from(program_files).join("Tailscale").join("tailscale.exe"))
 }
 
+/// Caminho do executável pra rodar comandos (`tailscale up`, `tailscale ip`,
+/// etc) — mesmo motivo do `known_install_path`: se o Tailscale acabou de ser
+/// instalado nesta mesma sessão do app (`ensure_tailscale_installed`), o
+/// PATH do processo atual não reflete a mudança que o instalador fez (só
+/// processos novos veem). Sem isso, `Command::new("tailscale")` falha com
+/// "program not found" mesmo com o Tailscale instalado e funcionando — foi
+/// exatamente esse bug que o Bruno bateu testando com um amigo no Windows
+/// (19/08/2026). Cai pro nome nu como último recurso, pra continuar
+/// funcionando em instalações mais antigas onde o PATH já estava correto
+/// antes do app abrir.
+pub(crate) fn resolve_tailscale_exe() -> PathBuf {
+    known_install_path()
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from("tailscale"))
+}
+
 /// Confere se o Tailscale (o app oficial deles, Rota B) já está instalado
 /// nessa máquina — sem instalar nada. Tenta o caminho conhecido primeiro
 /// (mais confiável, ver `known_install_path`) e cai pro PATH como reforço.
@@ -51,8 +103,9 @@ pub fn is_tailscale_installed() -> bool {
             return true;
         }
     }
-    std::process::Command::new("tailscale")
-        .arg("--version")
+    let mut cmd = std::process::Command::new("tailscale");
+    cmd.arg("--version");
+    suppress_console_window(&mut cmd)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -166,10 +219,9 @@ pub async fn start_tailscale_login(app: tauri::AppHandle) -> Result<(), String> 
 
     require_windows()?;
 
-    let mut child = tokio::process::Command::new("tailscale")
-        .arg("up")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut cmd = tokio::process::Command::new(resolve_tailscale_exe());
+    cmd.arg("up").stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = suppress_console_window_tokio(&mut cmd)
         .spawn()
         .map_err(|e| format!("não consegui iniciar 'tailscale up': {e}"))?;
 
@@ -271,9 +323,9 @@ pub async fn join_tailnet_as_guest(app: tauri::AppHandle) -> Result<(), String> 
         .key
         .ok_or_else(|| body.error.unwrap_or_else(|| "serviço de convite não devolveu uma chave".to_string()))?;
 
-    let status = tokio::process::Command::new("tailscale")
-        .arg("up")
-        .arg(format!("--authkey={key}"))
+    let mut cmd = tokio::process::Command::new(resolve_tailscale_exe());
+    cmd.arg("up").arg(format!("--authkey={key}"));
+    let status = suppress_console_window_tokio(&mut cmd)
         .status()
         .await
         .map_err(|e| format!("não consegui rodar 'tailscale up': {e}"))?;

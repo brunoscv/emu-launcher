@@ -109,7 +109,9 @@ pub fn get_local_lan_ip() -> Result<String, String> {
 /// interativa (abre navegador), fora do alcance de um command Tauri.
 #[tauri::command]
 pub fn get_tailscale_ip() -> Result<Option<String>, String> {
-    let output = match Command::new("tailscale").arg("ip").arg("-4").output() {
+    let mut cmd = Command::new(crate::tailscale_install::resolve_tailscale_exe());
+    cmd.arg("ip").arg("-4");
+    let output = match crate::tailscale_install::suppress_console_window(&mut cmd).output() {
         Ok(o) => o,
         Err(_) => return Ok(None),
     };
