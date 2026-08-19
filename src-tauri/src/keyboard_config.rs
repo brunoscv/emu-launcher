@@ -50,6 +50,13 @@ pub fn write_keyboard_config(
 
     if let Some(n) = device_number {
         contents.push_str(&format!("netplay_request_device_p{n} = \"true\"\n"));
+        // Overlay de ping em tempo real (canto da tela) — só faz sentido em
+        // partida de verdade, por isso dentro do `if` de multiplayer, não no
+        // "Jogar" solo. Pedido depois de sentir engasgos numa partida real de
+        // 3 PCs (19/08/2026, International Superstar Soccer Deluxe) sem
+        // nenhum jeito de saber, jogando, se um pico de ping bateu junto com
+        // o travamento.
+        contents.push_str("netplay_ping_show = \"true\"\n");
     }
 
     for player in &players {

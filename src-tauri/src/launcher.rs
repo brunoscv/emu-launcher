@@ -87,16 +87,45 @@ struct EmulatorClosedPayload {
 /// o monitoramento de saída do processo roda numa task em background —
 /// por isso essa função não precisa ser `async`, funciona chamada tanto de
 /// dentro de um command Tauri quanto de dentro do lock síncrono do lobby.
+/// Arquivo onde a saída do RetroArch (`--verbose`, quando presente nos args
+/// de netplay — ver `lobby.rs`/`LobbyScreen.tsx`) fica gravada, em vez de só
+/// herdada do processo pai. Antes disso, essa saída ficava perdida sempre
+/// que o app rodava sem console anexado — que é o caso NORMAL no Windows ao
+/// abrir com duplo-clique (sem terminal nenhum, o texto não vai a lugar
+/// nenhum), então dos 3 PCs testados numa partida real (19/08/2026,
+/// International Superstar Soccer Deluxe com engasgos), os 2 Windows não
+/// deixavam rastro nenhum pra investigar depois — só a máquina Linux rodada
+/// a partir de um terminal tinha alguma chance de mostrar algo, e mesmo
+/// assim só ficava no scrollback do terminal, não em lugar nenhum
+/// revisitável. Um arquivo por processo (timestamp no nome) em vez de um
+/// log único: partidas antigas não se misturam com a mais recente.
+fn open_retroarch_log_file() -> Result<(std::path::PathBuf, std::fs::File, std::fs::File), String> {
+    let mut dir = dirs::data_dir().ok_or("Não foi possível localizar o diretório de dados do usuário")?;
+    dir.push("emu-launcher");
+    dir.push("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    dir.push(format!("retroarch-{timestamp}.log"));
+
+    let stdout_file = std::fs::File::create(&dir).map_err(|e| e.to_string())?;
+    // Mesmo arquivo pros dois fds (fd duplicado, não um File::create novo) —
+    // stdout e stderr do RetroArch ficam intercalados na ordem real em que
+    // foram escritos, em vez de virar dois arquivos que precisam ser lidos
+    // lado a lado pra reconstruir a sequência de eventos.
+    let stderr_file = stdout_file.try_clone().map_err(|e| e.to_string())?;
+    Ok((dir, stdout_file, stderr_file))
+}
+
 pub fn spawn_emulator(
     emulator_path: &str,
     rom_path: Option<&str>,
     extra_args: &[String],
     on_exit: impl FnOnce(Option<i32>) + Send + 'static,
 ) -> Result<LaunchResult, String> {
-    // Log de investigação (IDEAS.md #009, bug dos controles) — `Command`
-    // herda o stdio do processo pai por padrão, então isso (e a saída do
-    // próprio RetroArch, se `--verbose` estiver nos args) aparece direto
-    // no terminal de quem rodou `npm run tauri dev` ou o binário release.
     println!(
         "[emu-launcher] lançando: {} {} {}",
         emulator_path,
@@ -114,6 +143,18 @@ pub fn spawn_emulator(
     // baixo (ver kill_pid). `-9 -pid` só funciona se pid for líder de grupo.
     #[cfg(unix)]
     cmd.process_group(0);
+
+    match open_retroarch_log_file() {
+        Ok((log_path, stdout_file, stderr_file)) => {
+            println!("[emu-launcher] log do RetroArch: {}", log_path.display());
+            cmd.stdout(stdout_file);
+            cmd.stderr(stderr_file);
+        }
+        Err(e) => {
+            println!("[emu-launcher] não consegui abrir arquivo de log ({e}) — saída do RetroArch vai herdada, como antes");
+        }
+    }
+
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Falha ao iniciar o emulador '{}': {}", emulator_path, e))?;
